@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "12714085452",
+    "project_id": "colorblendr",
+    "storage_bucket": "colorblendr.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:12714085452:android:e0e54be0f001fb8712b8e9",
+        "android_client_info": {
+          "package_name": "org.ColorBlendr.color_blendr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "12714085452-m7lqgf6p3um8pc64olt9n52q5ru5eob7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "org.ColorBlendr.color_blendr",
+            "certificate_hash": "09c1f6460fa159a38d7b71cb92ac8e04aaa67fc4"
+          }
+        },
+        {
+          "client_id": "12714085452-974d8839k08moob4i4o2ue18e9isua0m.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARbHFmuGp8PEYRjb1B5XVRgfZeOzQvUYQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "12714085452-974d8839k08moob4i4o2ue18e9isua0m.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "12714085452-gjhik28n1ovc8jjis9b4cloj7jccjglb.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "org.ColorBlendr.colorBlendr"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
