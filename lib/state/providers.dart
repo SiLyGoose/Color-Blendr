@@ -33,8 +33,7 @@ final billingProvider = Provider<Billing>(
       : const UnavailableBilling(),
 );
 
-/// Full-screen ads for free accounts. Off in release builds without a real
-/// ad unit.
+/// Full-screen ads for free accounts: Google's test ads in debug builds.
 final adsProvider = Provider<Ads>((ref) {
   final unit = interstitialUnitFor(
     AppConfig.adMobInterstitialId,

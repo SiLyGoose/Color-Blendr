@@ -94,16 +94,16 @@ void main() {
     expect(ads.shows, 0);
   });
 
-  test('a debug build without an ad unit uses Google test ads; release shows '
-      'none', () {
+  test('debug builds show Google test ads; release builds the real unit', () {
     expect(
-      interstitialUnitFor('', releaseBuild: false),
+      interstitialUnitFor('ca-app-pub-1/2', releaseBuild: false),
       testInterstitialUnitId,
     );
-    expect(interstitialUnitFor('', releaseBuild: true), isNull);
     expect(
       interstitialUnitFor('ca-app-pub-1/2', releaseBuild: true),
       'ca-app-pub-1/2',
     );
+    expect(interstitialUnitFor('', releaseBuild: true), isNull);
+    expect(interstitialUnitFor('', releaseBuild: false), isNull);
   });
 }

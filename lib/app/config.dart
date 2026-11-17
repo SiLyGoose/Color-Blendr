@@ -14,12 +14,14 @@ abstract final class AppConfig {
     'REVENUECAT_GOOGLE_KEY',
   );
 
-  /// AdMob interstitial unit (`ca-app-pub-…/…`) shown between generates on
-  /// free accounts. Empty uses Google's test unit in debug builds and turns
-  /// ads off in release builds. Pass it with `--dart-define=ADMOB_INTERSTITIAL_ID=…`.
+  /// AdMob interstitial unit shown between generates on free accounts, in
+  /// release builds. Debug builds always show Google's test ads instead, so
+  /// you never click your own live ads. Not secret. Override with
+  /// `--dart-define=ADMOB_INTERSTITIAL_ID=…`; an empty value turns ads off.
   /// The AdMob *app* id goes in android/local.properties (`admob.appId`).
   static const adMobInterstitialId = String.fromEnvironment(
     'ADMOB_INTERSTITIAL_ID',
+    defaultValue: 'ca-app-pub-9963034591853736/6738921200',
   );
 
   /// Google Play's page for managing this app's subscription.

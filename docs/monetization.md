@@ -204,8 +204,9 @@ Setup before release:
    Play.
 2. Put the app id in `android/local.properties`: `admob.appId=ca-app-pub-…~…`.
    Without it the build uses Google's sample app id.
-3. Build with `--dart-define=ADMOB_INTERSTITIAL_ID=ca-app-pub-…/…`. Debug builds
-   without it show Google's test ads. **Release builds without it show no ads.**
+3. The ad unit id is the default of `AppConfig.adMobInterstitialId`
+   (`lib/app/config.dart`). Release builds use it; debug builds always show
+   Google's test ads.
 4. AdMob → Privacy & messaging: publish a GDPR message (and a US states
    message if you want). The consent form only appears once that exists.
 5. Publish `app-ads.txt` on the developer website listed in Play.

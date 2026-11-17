@@ -7,11 +7,12 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 /// https://developers.google.com/admob/android/test-ads
 const testInterstitialUnitId = 'ca-app-pub-3940256099942544/1033173712';
 
-/// The ad unit to show, or null for no ads. Debug builds fall back to
-/// Google's test unit; release builds need a real one (never ship test ads).
+/// The ad unit to show, or null for no ads. Debug builds always use Google's
+/// test unit (clicking your own live ads can get the AdMob account banned).
+/// Release builds use [configured], or show no ads if it's empty.
 String? interstitialUnitFor(String configured, {required bool releaseBuild}) {
-  if (configured.isNotEmpty) return configured;
-  return releaseBuild ? null : testInterstitialUnitId;
+  if (configured.isEmpty) return null;
+  return releaseBuild ? configured : testInterstitialUnitId;
 }
 
 /// Full-screen ads between generates, for free accounts.
