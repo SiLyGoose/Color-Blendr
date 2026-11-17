@@ -86,7 +86,7 @@ and the `billing` block in `api/test/app.test.ts`. The SQL path in
     ```
     Generate the webhook secret with:
     `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
-15. Non-secret settings live in `api/neon.ts`: `REVENUECAT_ENTITLEMENT_ID=color_blendr_pro`, `REVENUECAT_ALLOW_SANDBOX=true`, `REVENUECAT_ALLOWED_STORES=play_store,promotional`.
+15. Non-secret settings live in `api/neon.ts`: `REVENUECAT_ENTITLEMENT_ID=color_blendr_pro`, `REVENUECAT_SANDBOX_STORES=play_store` (stores whose test purchases count for everyone), `REVENUECAT_ALLOWED_STORES=play_store,rc_billing,promotional`.
 16. Deploy: `cd api && npm run deploy`. Migrations 0001 and 0002 were applied to production on 2026-11-17. Future schema changes: run `npm run db:migrate` first, then deploy.
 17. Send a **test webhook** from the RevenueCat dashboard. It should return 200 and add a `TEST` row to `billing_events`.
 
@@ -152,7 +152,8 @@ receives. So:
 | Leaked secret key (`sk_…`) | That would be serious, so it lives only in `.env.local` on the server. Rotate it in RevenueCat if it ever leaks. |
 | One subscription shared across many accounts (buying again from a friend's account on the same Google account) | RevenueCat restore behavior "Keep with original App User ID" (step 11). A purchase stays with the account that bought it. |
 | Buy, use, refund | Play refund → RTDN → RevenueCat removes the entitlement → webhook → API removes Pro. Needs RTDN (step 6). |
-| Test or sandbox purchases | On Play, only license testers you add can make them. The store allowlist ignores RevenueCat's Test Store and other stores. Set `REVENUECAT_ALLOW_SANDBOX=false` if this ever ships on iOS, where anyone with TestFlight gets sandbox purchases. |
+| Test or sandbox purchases | On Play, only license testers you add can make them, so `REVENUECAT_SANDBOX_STORES=play_store` counts them for everyone. Web sandbox purchases (Stripe test cards) count only for `REVENUECAT_TESTER_EMAILS`: anyone could use a test card if the sandbox key leaked. The store allowlist ignores RevenueCat's Test Store and other stores. Never add `app_store` to the sandbox list if this ships on iOS, where anyone with TestFlight gets sandbox purchases. |
+| Leaked web key (`rcb_…`) | Public by design, like `goog_…`: it can only start a real, paid Stripe checkout. The web app also refuses to sell with a sandbox key (`rcb_sb_…`) on the live domain. |
 | Free-trial farming | Play allows one trial per Google account per subscription when eligibility is "never had this subscription". People with many Google accounts can still farm trials. Keep any trial short. |
 | Spamming `/v1/billing/sync` to burn the RevenueCat rate limit | At most one RevenueCat read per user every 10 s. |
 | RevenueCat outage | Errors are thrown, never read as "free", so Pro isn't stripped by an outage. The webhook returns 500 and RevenueCat retries. |
@@ -215,7 +216,27 @@ Setup before release:
    and app interactions, and shares them for advertising.
 7. Don't click your own live ads. Add your phone as a test device in AdMob.
 
-## 6. Notes and later options
+## 6. Selling on the web (RevenueCat Web Billing, added 2026-11-17)
+
+The web app (repo Color-Blendr-UI, `/app`) sells Pro through RevenueCat Web Billing. RevenueCat's checkout runs on the page and Stripe processes the payment. Purchases are made under our account id, so it's the **same RevenueCat customer and entitlement** (`color_blendr_pro`) as on Android. Pro bought on either platform works on both, and the API stays the only judge.
+
+- The API stores which store the purchase came from (`users.store_name`: `play_store` or `rc_billing`) and RevenueCat's management link (`store_management_url`). Both come back as `subscription.store` and `subscription.managementUrl` (migration 0003).
+- Web: "Manage subscription" opens RevenueCat's customer portal (cancel, update the card, invoices).
+- Android: for a web purchase, the app says where to manage it ("on the Color Blendr website, under Account") **with no link**. Play's payments policy limits steering people from the app to other ways to pay.
+- Deleting an account doesn't cancel a web subscription either; both apps and `/delete-account` say so.
+
+### Setup checklist (web)
+1. **Stripe**: create an account and finish activation (business details, bank account, statement descriptor such as `COLORBLENDR`). Stripe requires a public website with a contact email and a refund policy. The site has the contact email but **no Terms of Service or refund policy yet**: add them before going live.
+2. **RevenueCat → Project settings → Apps → + New → Web Billing (RevenueCat Billing)**. Connect your Stripe account. Set the app name, support email, and default currency.
+3. **Products** in that Web Billing app: monthly and yearly subscriptions plus a one-time lifetime product, with prices. Use any ids (e.g. `pro_monthly_web`, `pro_yearly_web`, `pro_lifetime_web`).
+4. **Entitlement `color_blendr_pro`**: attach the three web products.
+5. **Default offering**: add each web product to the existing `$rc_monthly`, `$rc_annual`, and `$rc_lifetime` packages. A package holds one product per app, so Android and the web share the same offering.
+6. **API keys**: copy the Web Billing **public** key (`rcb_…`) and the **sandbox** key (`rcb_sb_…`). In Vercel, set `VITE_REVENUECAT_WEB_KEY` to `rcb_…` for Production and to `rcb_sb_…` for Preview. Locally, put the sandbox key in `Color-Blendr-UI/.env.local`.
+7. **Customer portal and emails**: check that RevenueCat's Web Billing customer portal and receipt emails are on (Web Billing app settings).
+8. **Tax**: decide whether to turn on Stripe Tax (EU VAT, US sales tax). As the merchant of record on the web, you're responsible for tax there; Google handles it on Play.
+9. **Test**: use the sandbox key and a Stripe test card (`4242 4242 4242 4242`, any future date, any CVC) on `localhost:5173/app` or a Vercel preview, signed in with an account in `REVENUECAT_TESTER_EMAILS`. Then check `scripts/plan-state.mjs`: `store_name` should be `rc_billing`.
+
+## 7. Notes and later options
 
 - **RevenueCat pricing**: free up to $2.5k monthly tracked revenue, then 1% of revenue. The alternative is calling the Google Play Developer API (`purchases.subscriptionsv2`) and RTDN from this API directly. That's more code (acknowledging purchases within 3 days, upgrades and `linkedPurchaseToken`, Pub/Sub JWT checks), so it's only worth it if the 1% starts to hurt. `BillingProvider` in `src/billing.ts` is the seam for that swap.
 - RevenueCat REST v1 `GET /v1/subscribers/{id}` creates an empty customer if none exists. That's harmless.

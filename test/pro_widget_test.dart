@@ -479,6 +479,39 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets('bought on the web: says where to manage it, with no link', (
+      tester,
+    ) async {
+      await openSettings(
+        tester,
+        StoreSubscription(
+          expiresAt: DateTime(2026, 12, 4, 12),
+          willRenew: true,
+          store: 'rc_billing',
+        ),
+      );
+      expect(find.text('Renews on Dec 4, 2026'), findsOneWidget);
+      expect(find.text('Bought on the web'), findsOneWidget);
+      expect(find.text('Change or cancel in Google Play'), findsNothing);
+      final tile = tester.widget<ListTile>(
+        find.ancestor(
+          of: find.text('Bought on the web'),
+          matching: find.byType(ListTile),
+        ),
+      );
+      expect(tile.onTap, isNull);
+
+      await tester.ensureVisible(find.text('Delete account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete account'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Cancel it on the Color Blendr website'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Google Play'), findsNothing);
+    });
   });
   group('ads', () {
     Future<void> generate(WidgetTester tester, int times) async {

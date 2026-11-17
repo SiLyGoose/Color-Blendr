@@ -12,6 +12,11 @@ export default defineConfig({
         GOOGLE_CLIENT_ID:
           "381822964866-lt575n2vlmaduii4e0j5kn1ba6fq4a3b.apps.googleusercontent.com",
 
+        // Browser origins of the web app (repo Color-Blendr-UI, served at /app),
+        // comma-separated. The Vite dev server is included for local testing;
+        // it can't use anyone's session, which lives in the page's own origin.
+        WEB_ORIGINS: "https://color-blendr-ui.vercel.app,http://localhost:5173",
+
         // --- Billing (RevenueCat). See docs/monetization.md. ---------------
 
         // Secrets: read from api/.env.local by `npm run deploy`. Optional, so
@@ -30,10 +35,14 @@ export default defineConfig({
         },
 
         REVENUECAT_ENTITLEMENT_ID: "color_blendr_pro",
-        // Play test purchases come only from license testers you add in Play
-        // Console, so counting them is safe and lets you test on production.
-        REVENUECAT_ALLOW_SANDBOX: "true",
-        REVENUECAT_ALLOWED_STORES: "play_store,promotional",
+        // Stores whose sandbox (test) purchases count for everyone. Play test
+        // purchases come only from license testers you add in Play Console, so
+        // that's safe. Never add rc_billing: anyone with the web sandbox key and
+        // a Stripe test card could buy. Testers' sandbox purchases count anyway.
+        REVENUECAT_SANDBOX_STORES: "play_store",
+        // play_store = Android, rc_billing = the web app (RevenueCat Web
+        // Billing), promotional = grants made in the RevenueCat dashboard.
+        REVENUECAT_ALLOWED_STORES: "play_store,rc_billing,promotional",
       },
     },
   },

@@ -123,6 +123,8 @@ describe.skipIf(!url)("drizzle store (SQL)", () => {
       productId: "pro:weekly",
       willRenew: true,
       billingIssue: false,
+      store: "rc_billing",
+      managementUrl: "https://pay.rev.cat/manage/abc",
     };
     expect((await store.setStoreEntitlement(user.id, pro, t))?.storePlan).toBe("pro");
     const stale = await store.setStoreEntitlement(

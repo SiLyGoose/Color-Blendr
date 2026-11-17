@@ -1,5 +1,6 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
@@ -151,13 +152,16 @@ function userDto(row: UserRow, now: Date) {
     /** Null when free, or when Pro doesn't end. */
     proExpiresAt: pro ? (proEndsAt(row, now)?.toISOString() ?? null) : null,
     limits: { palettes: paletteLimit(row, now) },
-    /** The Google Play subscription behind Pro, if any (for "Manage subscription"). */
+    /** The store purchase behind Pro, if any (for "Manage subscription"). */
     subscription: hasStorePro(row, now)
       ? {
           productId: row.storeProductId,
           expiresAt: row.storeProExpiresAt?.toISOString() ?? null,
           willRenew: row.storeWillRenew,
           billingIssue: row.storeBillingIssue,
+          /** "play_store", "rc_billing" (bought on the web), "promotional"… */
+          store: row.storeName,
+          managementUrl: row.storeManagementUrl,
         }
       : null,
   };
@@ -206,6 +210,13 @@ export type AppDeps = {
   verifyGoogleToken: GoogleTokenVerifier;
   /** Omit to run without purchases (billing routes answer 503). */
   billing?: BillingDeps;
+  /**
+   * Browser origins allowed to call the API (the web app), e.g.
+   * "https://color-blendr-ui.vercel.app". The API authenticates with a bearer
+   * token, never cookies, so CORS only decides which sites' scripts may read
+   * responses. Empty: no browser access (the Android app doesn't need CORS).
+   */
+  webOrigins?: ReadonlySet<string>;
   /** Injectable for tests. */
   now?: () => Date;
 };
@@ -216,6 +227,7 @@ export function createApp({
   store,
   verifyGoogleToken,
   billing,
+  webOrigins = new Set(),
   now = () => new Date(),
 }: AppDeps) {
   const app = new Hono<Env>();
@@ -231,6 +243,17 @@ export function createApp({
   app.notFound((c) => c.json({ error: "Not found" }, 404));
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // The web app. Not on the RevenueCat webhook: only RevenueCat's servers call it.
+  const webCors = cors({
+    origin: (origin) => (webOrigins.has(origin) ? origin : null),
+    allowMethods: ["GET", "POST", "PATCH", "DELETE"],
+    allowHeaders: ["authorization", "content-type"],
+    maxAge: 86400,
+  });
+  app.use("/v1/*", async (c, next) =>
+    c.req.path === "/v1/billing/revenuecat" ? next() : webCors(c, next),
+  );
 
   app.use(
     "/v1/*",
@@ -297,7 +320,7 @@ export function createApp({
     return c.body(null, 204);
   });
 
-  // --- Billing (Google Play via RevenueCat) ---------------------------------
+  // --- Billing (Google Play and the web, via RevenueCat) --------------------
 
   const BILLING_OFF = { error: "Purchases are not available right now" };
 

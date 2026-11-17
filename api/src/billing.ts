@@ -1,10 +1,11 @@
 // Store billing through RevenueCat.
 //
 // Trust model (see docs/monetization.md):
-// - The app never tells the API that a user has paid. It buys through Google
-//   Play Billing with the RevenueCat SDK, RevenueCat validates the purchase
-//   token with Google's servers, and the API then asks RevenueCat (with the
-//   secret key, which never ships in the app) what the customer owns.
+// - The apps never tell the API that a user has paid. Android buys through
+//   Google Play Billing and the web app through RevenueCat Web Billing (Stripe),
+//   both with RevenueCat's SDKs. RevenueCat validates each purchase with the
+//   store, and the API then asks RevenueCat (with the secret key, which never
+//   ships in an app) what the customer owns.
 // - Webhooks only say "something changed for this customer". The handler
 //   re-reads the customer from RevenueCat instead of trusting the payload, so a
 //   forged or replayed webhook can't grant anything, and late or out-of-order
@@ -22,6 +23,10 @@ export type StoreEntitlement = {
   productId: string | null;
   willRenew: boolean;
   billingIssue: boolean;
+  /** RevenueCat's store name: "play_store", "rc_billing" (web), "promotional"… */
+  store: string | null;
+  /** Where the customer manages the subscription (Google Play, or RevenueCat's web portal). */
+  managementUrl: string | null;
 };
 
 export const NO_ENTITLEMENT: StoreEntitlement = {
@@ -30,6 +35,8 @@ export const NO_ENTITLEMENT: StoreEntitlement = {
   productId: null,
   willRenew: false,
   billingIssue: false,
+  store: null,
+  managementUrl: null,
 };
 
 /** Per-customer rules for reading an entitlement. */
@@ -61,6 +68,7 @@ const isoDate = z.string().nullish();
 
 const subscriberResponse = z.object({
   subscriber: z.object({
+    management_url: z.string().nullish(),
     entitlements: z
       .record(
         z.string(),
@@ -100,11 +108,13 @@ export type RevenueCatOptions = {
   /** The RevenueCat entitlement that means Pro. */
   entitlementId: string;
   /**
-   * Count sandbox (test) purchases. On Google Play only license testers listed
-   * in Play Console can make them, so this is safe there. Keep it false for
-   * stores where anyone can get sandbox access (e.g. iOS TestFlight).
+   * Stores whose sandbox (test) purchases count for everyone. Only safe where
+   * the store itself limits who can test: on Google Play, only license testers
+   * listed in Play Console can. Never "rc_billing": anyone with the web
+   * sandbox key and a Stripe test card could get Pro for free. Testers'
+   * sandbox purchases count from any store (EntitlementContext.tester).
    */
-  allowSandbox: boolean;
+  sandboxStores: readonly string[];
   /**
    * Stores whose purchases count. "promotional" is a grant made from the
    * RevenueCat dashboard. Anything else (e.g. RevenueCat's Test Store, which
@@ -125,7 +135,7 @@ const parseDate = (s: string | null | undefined) => {
 export function entitlementFromSubscriber(
   body: unknown,
   now: Date,
-  opts: Pick<RevenueCatOptions, "entitlementId" | "allowSandbox" | "allowedStores">,
+  opts: Pick<RevenueCatOptions, "entitlementId" | "sandboxStores" | "allowedStores">,
   context: EntitlementContext = {},
 ): StoreEntitlement {
   const { subscriber } = subscriberResponse.parse(body);
@@ -145,8 +155,8 @@ export function entitlementFromSubscriber(
     const refused =
       store === null || !opts.allowedStores.includes(store)
         ? `store ${store ?? "unknown"} not allowed`
-        : sandbox && !opts.allowSandbox
-          ? "sandbox purchases not allowed"
+        : sandbox && !opts.sandboxStores.includes(store)
+          ? `sandbox purchases from ${store} not allowed`
           : null;
     if (refused) {
       // Logged so a misconfigured store or tester list is easy to spot.
@@ -174,7 +184,19 @@ export function entitlementFromSubscriber(
     productId,
     willRenew: !!sub && !sub.unsubscribe_detected_at && !sub.refunded_at && active,
     billingIssue: !!sub?.billing_issues_detected_at && active,
+    store,
+    managementUrl: safeUrl(subscriber.management_url),
   };
+}
+
+/** Only https links reach the apps, which open them. */
+function safeUrl(s: string | null | undefined): string | null {
+  if (!s) return null;
+  try {
+    return new URL(s).protocol === "https:" ? s : null;
+  } catch {
+    return null;
+  }
 }
 
 export function revenueCatProvider(opts: RevenueCatOptions): BillingProvider {

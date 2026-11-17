@@ -178,6 +178,8 @@ export function drizzleStore(db: NodePgDatabase): Store {
           storeProductId: e.productId,
           storeWillRenew: e.willRenew,
           storeBillingIssue: e.billingIssue,
+          storeName: e.store,
+          storeManagementUrl: e.managementUrl,
           storeSyncedAt: checkedAt,
         })
         .where(

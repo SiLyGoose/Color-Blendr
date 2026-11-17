@@ -17,6 +17,12 @@ if (!googleClientId) throw new Error("GOOGLE_CLIENT_ID is required");
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 attachDatabasePool(pool);
 
+const list = (s: string) =>
+  s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
 /**
  * Purchases need both RevenueCat secrets (set in .env.local, never in the app
  * or in git). Without them the API runs as before and billing routes 503.
@@ -46,17 +52,23 @@ function billingFromEnv(env: NodeJS.ProcessEnv): BillingDeps | undefined {
     provider: revenueCatProvider({
       secretKey,
       entitlementId: env.REVENUECAT_ENTITLEMENT_ID || "pro",
-      allowSandbox: env.REVENUECAT_ALLOW_SANDBOX === "true",
-      allowedStores: (env.REVENUECAT_ALLOWED_STORES || "play_store,promotional")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      sandboxStores: list(env.REVENUECAT_SANDBOX_STORES ?? "play_store"),
+      allowedStores: list(env.REVENUECAT_ALLOWED_STORES || "play_store,rc_billing,promotional"),
     }),
   };
 }
+
+/** WEB_ORIGINS: comma-separated origins of the web app (see neon.ts). */
+const webOrigins = new Set(
+  (process.env.WEB_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim().replace(/\/+$/, ""))
+    .filter(Boolean),
+);
 
 export default createApp({
   store: drizzleStore(drizzle(pool)),
   verifyGoogleToken: googleIdTokenVerifier(googleClientId),
   billing: billingFromEnv(process.env),
+  webOrigins,
 });

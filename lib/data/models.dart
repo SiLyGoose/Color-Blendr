@@ -197,6 +197,7 @@ class StoreSubscription {
     this.expiresAt,
     this.willRenew = false,
     this.billingIssue = false,
+    this.store,
   });
 
   final String? productId;
@@ -207,8 +208,16 @@ class StoreSubscription {
   /// False once the user cancels; Pro still runs to [expiresAt].
   final bool willRenew;
 
-  /// Google Play couldn't charge the user (they keep Pro during the grace period).
+  /// The store couldn't charge the user (they keep Pro during the grace period).
   final bool billingIssue;
+
+  /// RevenueCat's store: "play_store", "rc_billing" (bought on the website),
+  /// "promotional"… Null from older API versions, which only sold on Play.
+  final String? store;
+
+  /// Bought on Google Play, so it's managed there. Web purchases are managed
+  /// on the website; the app only names it (Play's payments policy).
+  bool get isGooglePlay => store == null || store == 'play_store';
 
   factory StoreSubscription.fromJson(Map<String, dynamic> json) =>
       StoreSubscription(
@@ -219,6 +228,7 @@ class StoreSubscription {
         },
         willRenew: json['willRenew'] == true,
         billingIssue: json['billingIssue'] == true,
+        store: json['store'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -226,6 +236,7 @@ class StoreSubscription {
     'expiresAt': expiresAt?.toIso8601String(),
     'willRenew': willRenew,
     'billingIssue': billingIssue,
+    'store': store,
   };
 }
 

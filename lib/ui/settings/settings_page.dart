@@ -210,17 +210,31 @@ class _PlanTile extends ConsumerWidget {
             textColor: theme.colorScheme.error,
             leading: const Icon(Icons.credit_card_off_outlined),
             title: const Text('Payment problem'),
-            subtitle: const Text(
-              'Fix your payment method in Google Play to keep Pro',
+            subtitle: Text(
+              renewing.isGooglePlay
+                  ? 'Fix your payment method in Google Play to keep Pro'
+                  : 'Fix your payment method on the Color Blendr website to keep Pro',
             ),
-            onTap: () => openManageSubscription(context),
+            onTap: renewing.isGooglePlay
+                ? () => openManageSubscription(context)
+                : null,
           ),
-        if (renewing != null)
+        if (renewing != null && renewing.isGooglePlay)
           ListTile(
             leading: const Icon(Icons.open_in_new),
             title: const Text('Manage subscription'),
             subtitle: const Text('Change or cancel in Google Play'),
             onTap: () => openManageSubscription(context),
+          )
+        // Bought on the website: say where to manage it, without a link
+        // (Play's payments policy).
+        else if (renewing != null)
+          const ListTile(
+            leading: Icon(Icons.language),
+            title: Text('Bought on the web'),
+            subtitle: Text(
+              'Change or cancel it on the Color Blendr website, under Account',
+            ),
           ),
       ],
     );
@@ -293,6 +307,7 @@ class _SignedInState extends ConsumerState<_SignedIn> {
       _ => 'all $count of your saved palettes',
     };
     final renews = widget.user.subscription?.willRenew ?? false;
+    final onPlay = widget.user.subscription?.isGooglePlay ?? true;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -307,7 +322,16 @@ class _SignedInState extends ConsumerState<_SignedIn> {
               Text(
                 'This permanently deletes your Color Blendr account and $palettes. This can’t be undone.',
               ),
-              if (renews) ...[
+              if (renews && !onPlay) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Deleting your account doesn’t cancel your subscription. '
+                  'Cancel it on the Color Blendr website, under Account, to '
+                  'stop being charged.',
+                  style: TextStyle(color: scheme.error),
+                ),
+              ],
+              if (renews && onPlay) ...[
                 const SizedBox(height: 12),
                 Text(
                   'Deleting your account doesn’t cancel your Google Play '

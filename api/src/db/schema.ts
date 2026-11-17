@@ -33,7 +33,7 @@ export const users = pgTable("users", {
   /** When the granted Pro ends. Null with plan "pro" means it doesn't end. */
   proExpiresAt: timestamp("pro_expires_at", { withTimezone: true }),
 
-  // Store purchase (Google Play, verified by RevenueCat). Only the billing
+  // Store purchase (Google Play or the web, verified by RevenueCat). Only the billing
   // sync writes these, always from RevenueCat's server-side view of the
   // customer, never from anything the app sends. See src/billing.ts.
 
@@ -45,8 +45,12 @@ export const users = pgTable("users", {
   storeProductId: text("store_product_id"),
   /** False once the user cancels (Pro still runs to storeProExpiresAt). */
   storeWillRenew: boolean("store_will_renew").notNull().default(false),
-  /** Renewal payment failed; Play is retrying (grace period / account hold). */
+  /** Renewal payment failed; the store is retrying (grace period / account hold). */
   storeBillingIssue: boolean("store_billing_issue").notNull().default(false),
+  /** RevenueCat store of that purchase: "play_store", "rc_billing" (web)… */
+  storeName: text("store_name"),
+  /** Where the customer manages it: Google Play, or RevenueCat's web portal. */
+  storeManagementUrl: text("store_management_url"),
   /** When RevenueCat was last asked about this user. */
   storeSyncedAt: timestamp("store_synced_at", { withTimezone: true }),
 });

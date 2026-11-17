@@ -11,8 +11,8 @@ import {
 const now = new Date("2026-11-17T12:00:00Z");
 const opts = {
   entitlementId: "pro",
-  allowSandbox: false,
-  allowedStores: ["play_store", "promotional"],
+  sandboxStores: [] as string[],
+  allowedStores: ["play_store", "rc_billing", "promotional"],
 };
 
 /** A RevenueCat v1 subscriber with one Play subscription to "pro:weekly". */
@@ -24,6 +24,7 @@ function subscriber(
     request_date: now.toISOString(),
     subscriber: {
       original_app_user_id: "u1",
+      management_url: "https://play.google.com/store/account/subscriptions",
       entitlements: {
         pro: {
           expires_date: "2026-11-20T12:00:00Z",
@@ -57,7 +58,25 @@ describe("entitlementFromSubscriber", () => {
       productId: "pro:weekly",
       willRenew: true,
       billingIssue: false,
+      store: "play_store",
+      managementUrl: "https://play.google.com/store/account/subscriptions",
     });
+  });
+
+  it("a web (RevenueCat Web Billing) subscription is Pro, with its portal link", () => {
+    const body = subscriber({ store: "rc_billing" });
+    body.subscriber.management_url = "https://pay.rev.cat/manage/abc";
+    expect(entitlementFromSubscriber(body, now, opts)).toMatchObject({
+      plan: "pro",
+      store: "rc_billing",
+      managementUrl: "https://pay.rev.cat/manage/abc",
+    });
+  });
+
+  it("only passes on https management links", () => {
+    const body = subscriber();
+    body.subscriber.management_url = "javascript:alert(1)";
+    expect(entitlementFromSubscriber(body, now, opts).managementUrl).toBeNull();
   });
 
   it("no entitlement, or a different one, is free", () => {
@@ -101,10 +120,16 @@ describe("entitlementFromSubscriber", () => {
     expect(e).toMatchObject({ plan: "pro", willRenew: false });
   });
 
-  it("sandbox purchases count only when allowed", () => {
-    const body = subscriber({ is_sandbox: true });
-    expect(entitlementFromSubscriber(body, now, opts)).toEqual(NO_ENTITLEMENT);
-    expect(entitlementFromSubscriber(body, now, { ...opts, allowSandbox: true }).plan).toBe("pro");
+  it("sandbox purchases count only from the stores allowed for everyone", () => {
+    const play = subscriber({ is_sandbox: true });
+    expect(entitlementFromSubscriber(play, now, opts)).toEqual(NO_ENTITLEMENT);
+    const playOk = { ...opts, sandboxStores: ["play_store"] };
+    expect(entitlementFromSubscriber(play, now, playOk).plan).toBe("pro");
+    // Web Billing sandbox (a Stripe test card) never counts for everyone…
+    const web = subscriber({ store: "rc_billing", is_sandbox: true });
+    expect(entitlementFromSubscriber(web, now, playOk)).toEqual(NO_ENTITLEMENT);
+    // …only for tester accounts.
+    expect(entitlementFromSubscriber(web, now, playOk, { tester: true }).plan).toBe("pro");
   });
 
   it("purchases from other stores don't count", () => {

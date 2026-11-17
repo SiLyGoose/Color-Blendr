@@ -46,6 +46,8 @@ function memoryStore() {
         storeProductId: null,
         storeWillRenew: false,
         storeBillingIssue: false,
+        storeName: null,
+        storeManagementUrl: null,
         storeSyncedAt: null,
       };
       users.push(row);
@@ -88,6 +90,8 @@ function memoryStore() {
         storeProductId: e.productId,
         storeWillRenew: e.willRenew,
         storeBillingIssue: e.billingIssue,
+        storeName: e.store,
+        storeManagementUrl: e.managementUrl,
         storeSyncedAt: checkedAt,
       });
       return user;
@@ -623,6 +627,8 @@ const weekly = (endsInMs = 7 * DAY): StoreEntitlement => ({
   productId: "pro:weekly",
   willRenew: true,
   billingIssue: false,
+  store: "play_store",
+  managementUrl: "https://play.google.com/store/account/subscriptions",
 });
 
 describe("billing", () => {
@@ -667,7 +673,13 @@ describe("billing", () => {
     expect(body).toMatchObject({
       plan: "pro",
       limits: { palettes: null },
-      subscription: { productId: "pro:weekly", willRenew: true, billingIssue: false },
+      subscription: {
+        productId: "pro:weekly",
+        willRenew: true,
+        billingIssue: false,
+        store: "play_store",
+        managementUrl: "https://play.google.com/store/account/subscriptions",
+      },
     });
     expect(body.proExpiresAt).toBe(body.subscription.expiresAt);
   });
@@ -820,5 +832,67 @@ describe("billing", () => {
     const token = await signIn("alice");
     expect((await call("POST", "/v1/billing/sync", { token })).status).toBe(503);
     expect((await webhook({ id: "e1", type: "TEST" })).status).toBe(503);
+  });
+});
+
+describe("CORS for the web app", () => {
+  const WEB = "https://color-blendr-ui.vercel.app";
+
+  beforeEach(() => {
+    app = createApp({ store: db.store, verifyGoogleToken, webOrigins: new Set([WEB]) });
+  });
+
+  it("answers preflights from allowed origins only", async () => {
+    const preflight = (origin: string) =>
+      app.request("/v1/palettes", {
+        method: "OPTIONS",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization, content-type",
+        },
+      });
+    const ok = await preflight(WEB);
+    expect(ok.status).toBe(204);
+    expect(ok.headers.get("access-control-allow-origin")).toBe(WEB);
+    expect(ok.headers.get("access-control-allow-headers")).toContain("authorization");
+    expect(ok.headers.get("access-control-allow-credentials")).toBeNull();
+
+    const evil = await preflight("https://evil.example");
+    expect(evil.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("adds the header to normal and error responses", async () => {
+    const token = await signIn("alice");
+    const me = await app.request("/v1/me", {
+      headers: { origin: WEB, authorization: `Bearer ${token}` },
+    });
+    expect(me.status).toBe(200);
+    expect(me.headers.get("access-control-allow-origin")).toBe(WEB);
+
+    const unauthorized = await app.request("/v1/me", { headers: { origin: WEB } });
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("access-control-allow-origin")).toBe(WEB);
+
+    const bad = await app.request("/v1/palettes", {
+      method: "POST",
+      headers: { origin: WEB, authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.headers.get("access-control-allow-origin")).toBe(WEB);
+  });
+
+  it("is off by default and never on the RevenueCat webhook", async () => {
+    app = createApp({ store: db.store, verifyGoogleToken });
+    const res = await app.request("/v1/me", { headers: { origin: WEB } });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+
+    app = createApp({ store: db.store, verifyGoogleToken, webOrigins: new Set([WEB]) });
+    const hook = await app.request("/v1/billing/revenuecat", {
+      method: "OPTIONS",
+      headers: { origin: WEB, "access-control-request-method": "POST" },
+    });
+    expect(hook.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
