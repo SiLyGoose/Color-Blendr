@@ -1,0 +1,31 @@
+{
+  "name": "color-blendr-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Color Blendr backend: palette storage on Neon Functions + Lakebase Postgres",
+  "type": "module",
+  "scripts": {
+    "dev": "neon dev",
+    "deploy": "neon deploy --env .env.local",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@neon/functions": "^0.11.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.19",
+    "jose": "^6.2.17",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@neon/config": "^1.14.2",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
