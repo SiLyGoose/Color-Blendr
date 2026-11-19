@@ -38,6 +38,10 @@ dependencies:
   # Opens Google Play's "Manage subscription" page
   url_launcher: ^6.3.3
   google_mobile_ads: ^9.2.0
+  # AdMob mediation: Unity Ads bids against Google for each ad (set up in the
+  # AdMob console). Pinned to a version whose google_mobile_ads range
+  # includes ours.
+  gma_mediation_unity: 1.12.0
 
 dev_dependencies:
   flutter_test:

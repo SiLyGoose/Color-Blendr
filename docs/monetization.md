@@ -199,6 +199,25 @@ product. Pro accounts never load the ad SDK or see the consent form.
 | Counting, pacing, Pro check | `lib/state/ads_controller.dart` |
 | Ad, then the offer | `_generateByUser` in `lib/ui/generator/generator_page.dart` |
 | "Ad privacy choices" (EEA/UK only) | `lib/ui/settings/settings_page.dart` |
+| Unity Ads mediation adapter | `pubspec.yaml` (`gma_mediation_unity`, pinned to a version that matches `google_mobile_ads`) |
+| US "do not sell or share" choice, passed to Unity | `lib/data/us_privacy.dart`, read through the `privacy` channel in `MainActivity.kt` |
+
+**Mediation (Unity Ads, added 2026-11-19).** Unity Ads bids against Google for
+each interstitial through AdMob mediation. The adapter registers itself, so
+there's no other ad code. It picks up GDPR consent from the consent form by
+itself. The US-state opt-out isn't passed on automatically, so before the SDK
+starts (and after Ad privacy choices) the app reads it from the IAB GPP strings
+the consent form saves and calls `setCCPAConsent`. A US section the decoder
+can't read counts as opted out. The same code is in Tidy Town.
+
+Unity setup (Unity dashboard → Monetization): Color Blendr is its own Android
+app there, Game ID `800445678`, interstitial placement `BP_Interstitial_Android`
+(Tidy Town's Game ID is different, don't mix them up). It's mapped in AdMob's
+Android interstitial mediation group under **Bidding → Unity Ads**. Its
+app-ads.txt lines are in the Color-Blendr-UI repo (`site/app-ads.txt`), and
+the privacy policy there names Unity. Also add **Unity Ads** to the ad partners
+in both AdMob Privacy & messaging messages, and check fill with AdMob →
+Mediation → Ad inspector on a test device.
 
 Setup before release:
 

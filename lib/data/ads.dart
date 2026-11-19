@@ -1,7 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:gma_mediation_unity/gma_mediation_unity.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+import 'us_privacy.dart';
 
 /// Google's sample interstitial unit: always fills with a labeled test ad.
 /// https://developers.google.com/admob/android/test-ads
@@ -85,11 +88,26 @@ class AdMobAds implements Ads {
               .getPrivacyOptionsRequirementStatus() ==
           PrivacyOptionsRequirementStatus.required;
       if (!_canRequestAds) return;
+      // Before the SDK starts, so the networks know from their first ad.
+      await _passUsPrivacyToNetworks();
       await MobileAds.instance.initialize();
       _load();
     } catch (e) {
       // No ads is better than a broken app.
       debugPrint('Ads unavailable: $e');
+    }
+  }
+
+  /// AdMob mediation: Unity Ads competes with Google for each ad (bidding is
+  /// set up in the AdMob console). Its adapter picks up GDPR consent from the
+  /// consent form by itself, but the US-state "do not sell or share" choice
+  /// must be handed to it.
+  Future<void> _passUsPrivacyToNetworks() async {
+    try {
+      final optedOut = usPrivacyOptOut(await readIabStrings());
+      await GmaMediationUnity().setCCPAConsent(!optedOut);
+    } catch (e) {
+      debugPrint('Mediation privacy settings: $e');
     }
   }
 
@@ -194,6 +212,8 @@ class AdMobAds implements Ads {
     await done.future;
     // Their answer decides whether ads may load at all.
     _canRequestAds = await ConsentInformation.instance.canRequestAds();
+    // A changed US opt-out applies from the next ad.
+    await _passUsPrivacyToNetworks();
     if (_canRequestAds) {
       await MobileAds.instance.initialize();
       _load();
