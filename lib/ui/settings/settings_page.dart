@@ -12,6 +12,7 @@ import '../../state/library_controller.dart';
 import '../../state/settings_controller.dart';
 import '../common.dart';
 import '../pro/pro_sheet.dart';
+import 'subscription_sheet.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -217,7 +218,7 @@ class _PlanTile extends ConsumerWidget {
             ),
             onTap: renewing.isGooglePlay
                 ? () => openManageSubscription(context)
-                : null,
+                : () => showSubscriptionSheet(context),
           ),
         if (renewing != null && renewing.isGooglePlay)
           ListTile(
@@ -226,15 +227,14 @@ class _PlanTile extends ConsumerWidget {
             subtitle: const Text('Change or cancel in Google Play'),
             onTap: () => openManageSubscription(context),
           )
-        // Bought on the website: say where to manage it, without a link
-        // (Play's payments policy).
+        // Bought on the website: its details and invoices, read-only. It's
+        // changed or cancelled on the website (Play's payments policy).
         else if (renewing != null)
-          const ListTile(
-            leading: Icon(Icons.language),
-            title: Text('Bought on the web'),
-            subtitle: Text(
-              'Change or cancel it on the Color Blendr website, under Account',
-            ),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('Subscription details'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showSubscriptionSheet(context),
           ),
       ],
     );

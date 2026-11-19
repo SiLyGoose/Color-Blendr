@@ -80,6 +80,10 @@ class FakeServer {
   /// How many `/v1/billing/sync` calls to answer with the old plan before
   /// seeing [storePurchase] (RevenueCat not caught up yet).
   int syncLag = 0;
+
+  /// What `/v1/billing/subscription` returns (Pro bought on the website);
+  /// null answers 404, as when Stripe doesn't list one.
+  Map<String, dynamic>? webSubscription;
   final palettes = <Map<String, dynamic>>[];
   final folders = <Map<String, dynamic>>[];
   final requests = <String>[];
@@ -153,6 +157,12 @@ class FakeServer {
           pro = true;
         }
         return _json(user);
+      case ('GET', '/v1/billing/subscription'):
+        final sub = webSubscription;
+        if (sub == null) {
+          return _json({'error': 'No web subscription found'}, 404);
+        }
+        return _json({'subscription': sub});
       case ('GET', '/v1/me'):
         return _json(user);
       case ('GET', '/v1/palettes'):

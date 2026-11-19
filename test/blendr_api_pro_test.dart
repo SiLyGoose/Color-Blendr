@@ -233,6 +233,61 @@ void main() {
       );
     });
 
+    group('web subscription', () {
+      Map<String, dynamic> sub(String status) => {
+        'status': status,
+        'interval': 'month',
+        'amount': 499,
+        'currency': 'usd',
+        'invoices': <Object>[],
+      };
+      http.Response reply(Object body, [int status = 200]) =>
+          http.Response(jsonEncode(body), status);
+
+      test(
+        'a running live subscription wins without asking test mode',
+        () async {
+          final asked = <String>[];
+          final found = await api((r) async {
+            asked.add(r.url.query);
+            return reply({'subscription': sub('active')});
+          }).webSubscription();
+          expect(found?.status, 'active');
+          expect(found?.test, isFalse);
+          expect(asked, ['']);
+        },
+      );
+
+      test('an ended live one loses to a running test one', () async {
+        final found = await api((r) async {
+          final test = r.url.queryParameters['test'] == '1';
+          return reply({'subscription': sub(test ? 'active' : 'canceled')});
+        }).webSubscription();
+        expect(found?.status, 'active');
+        expect(found?.test, isTrue);
+      });
+
+      test('an ended live one is shown when test mode has none', () async {
+        final found = await api((r) async {
+          if (r.url.queryParameters['test'] == '1') {
+            return reply({
+              'error': 'Test purchases are only for test accounts',
+            }, 403);
+          }
+          return reply({'subscription': sub('canceled')});
+        }).webSubscription();
+        expect(found?.status, 'canceled');
+        expect(found?.test, isFalse);
+      });
+
+      test('none anywhere is null', () async {
+        final found = await api(
+          (r) async => reply({'error': 'No web subscription found'}, 404),
+        ).webSubscription();
+        expect(found, isNull);
+      });
+    });
+
     test('sync posts with no body and returns the profile', () async {
       late http.Request sent;
       final user = await api((request) async {

@@ -418,9 +418,12 @@ void main() {
   group('subscription in settings', () {
     Future<void> openSettings(
       WidgetTester tester,
-      StoreSubscription sub,
-    ) async {
-      final server = FakeServer(pro: true)..storePurchase = sub;
+      StoreSubscription sub, {
+      Map<String, dynamic>? webSubscription,
+    }) async {
+      final server = FakeServer(pro: true)
+        ..storePurchase = sub
+        ..webSubscription = webSubscription;
       await pumpSignedIn(tester, server);
       await tester.tap(tab('Settings'));
       await tester.pumpAndSettle();
@@ -480,27 +483,20 @@ void main() {
       );
     });
 
-    testWidgets('bought on the web: says where to manage it, with no link', (
+    final webSub = StoreSubscription(
+      expiresAt: DateTime(2026, 12, 4, 12),
+      willRenew: true,
+      store: 'stripe',
+    );
+
+    testWidgets('bought on the web: details instead of Google Play', (
       tester,
     ) async {
-      await openSettings(
-        tester,
-        StoreSubscription(
-          expiresAt: DateTime(2026, 12, 4, 12),
-          willRenew: true,
-          store: 'rc_billing',
-        ),
-      );
+      await openSettings(tester, webSub);
       expect(find.text('Renews on Dec 4, 2026'), findsOneWidget);
-      expect(find.text('Bought on the web'), findsOneWidget);
+      expect(find.text('Subscription details'), findsOneWidget);
+      expect(find.text('Manage subscription'), findsNothing);
       expect(find.text('Change or cancel in Google Play'), findsNothing);
-      final tile = tester.widget<ListTile>(
-        find.ancestor(
-          of: find.text('Bought on the web'),
-          matching: find.byType(ListTile),
-        ),
-      );
-      expect(tile.onTap, isNull);
 
       await tester.ensureVisible(find.text('Delete account'));
       await tester.pumpAndSettle();
@@ -511,6 +507,94 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Google Play'), findsNothing);
+    });
+
+    testWidgets('web subscription details: plan, next payment, invoices', (
+      tester,
+    ) async {
+      await openSettings(
+        tester,
+        webSub,
+        webSubscription: {
+          'status': 'active',
+          'plan': 'yearly',
+          'amount': 3599,
+          'currency': 'usd',
+          'interval': 'year',
+          'currentPeriodEnd': DateTime(2027, 11, 19, 12).toIso8601String(),
+          'cancelAt': null,
+          'endedAt': null,
+          'invoices': [
+            {
+              'id': 'in_2',
+              'date': DateTime(2026, 11, 19, 12).toIso8601String(),
+              'amount': 3599,
+              'currency': 'usd',
+              'status': 'paid',
+              'refunded': false,
+              'url': 'https://invoice.stripe.com/i/paid',
+            },
+            {
+              'id': 'in_1',
+              'date': DateTime(2026, 10, 19, 12).toIso8601String(),
+              'amount': 499,
+              'currency': 'usd',
+              'status': 'open',
+              'refunded': false,
+              'url': 'https://invoice.stripe.com/i/open',
+            },
+          ],
+        },
+      );
+      await tester.tap(find.text('Subscription details'));
+      await tester.pumpAndSettle();
+
+      expect(inSheet('Color Blendr Pro · Yearly'), findsOneWidget);
+      expect(inSheet('\$35.99 per year'), findsOneWidget);
+      expect(inSheet('Active'), findsOneWidget);
+      expect(
+        inSheet('Next payment: \$35.99 on November 19, 2027.'),
+        findsOneWidget,
+      );
+      expect(inSheet('Paid'), findsOneWidget);
+      expect(inSheet('Due'), findsOneWidget);
+
+      ListTile row(String date) => tester.widget<ListTile>(
+        find.ancestor(of: inSheet(date), matching: find.byType(ListTile)),
+      );
+      expect(row('Nov 19, 2026').onTap, isNotNull, reason: 'paid: receipt');
+      expect(
+        row('Oct 19, 2026').onTap,
+        isNull,
+        reason: 'unpaid: Stripe’s page would ask for payment',
+      );
+    });
+
+    testWidgets('web subscription details: cancelled', (tester) async {
+      await openSettings(
+        tester,
+        webSub,
+        webSubscription: {
+          'status': 'active',
+          'amount': 499,
+          'currency': 'usd',
+          'interval': 'month',
+          'currentPeriodEnd': DateTime(2026, 12, 4, 12).toIso8601String(),
+          'cancelAt': DateTime(2026, 12, 4, 12).toIso8601String(),
+          'invoices': <Object>[],
+        },
+      );
+      await tester.tap(find.text('Subscription details'));
+      await tester.pumpAndSettle();
+
+      expect(inSheet('Cancelled'), findsOneWidget);
+      expect(
+        inSheet(
+          'Cancelled. You keep Pro until December 4, 2026, and won’t be charged again.',
+        ),
+        findsOneWidget,
+      );
+      expect(inSheet('No invoices yet.'), findsOneWidget);
     });
   });
   group('ads', () {

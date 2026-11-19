@@ -68,6 +68,40 @@ class BlendrApi {
     await _send('POST', '/v1/billing/sync') as Map<String, dynamic>,
   );
 
+  /// The account's subscription bought on the website, with its invoices.
+  /// Null when Stripe doesn't list one (yet: its search can lag a new
+  /// purchase by up to a minute).
+  ///
+  /// Also checks Stripe's test mode, which only tester accounts may read
+  /// (others get 403, read as none), unless a live one is still running. A
+  /// running subscription wins over one that ended, so a tester with a
+  /// refunded live purchase and an active test one sees the one giving Pro.
+  Future<WebSubscription?> webSubscription() async {
+    final live = await _webSubscription(test: false);
+    if (live != null && live.isRunning) return live;
+    final test = await _webSubscription(test: true);
+    if (test != null && test.isRunning) return test;
+    return live ?? test;
+  }
+
+  Future<WebSubscription?> _webSubscription({required bool test}) async {
+    try {
+      final json = await _send(
+        'GET',
+        '/v1/billing/subscription${test ? '?test=1' : ''}',
+      ) as Map<String, dynamic>;
+      return WebSubscription.fromJson(
+        json['subscription'] as Map<String, dynamic>,
+        test: test,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      // Test mode: not a tester, or test billing isn't set up.
+      if (test && (e.statusCode == 403 || e.statusCode == 503)) return null;
+      rethrow;
+    }
+  }
+
   // --- Palettes --------------------------------------------------------------
 
   Future<List<SavedPalette>> listPalettes() async {

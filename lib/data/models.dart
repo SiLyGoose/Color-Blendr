@@ -240,6 +240,114 @@ class StoreSubscription {
   };
 }
 
+/// One invoice of a web (Stripe) subscription.
+@immutable
+class WebInvoice {
+  const WebInvoice({
+    required this.id,
+    required this.date,
+    required this.amount,
+    required this.currency,
+    required this.status,
+    this.refunded = false,
+    this.url,
+  });
+
+  final String id;
+  final DateTime date;
+
+  /// Total in minor units (cents).
+  final int amount;
+  final String currency;
+
+  /// Stripe's invoice status: paid, open, void, uncollectible.
+  final String status;
+  final bool refunded;
+
+  /// Stripe's hosted invoice page (receipt and PDF).
+  final String? url;
+
+  factory WebInvoice.fromJson(Map<String, dynamic> json) => WebInvoice(
+    id: json['id'] as String,
+    date: DateTime.parse(json['date'] as String),
+    amount: (json['amount'] as num).toInt(),
+    currency: json['currency'] as String,
+    status: json['status'] as String,
+    refunded: json['refunded'] == true,
+    url: json['url'] as String?,
+  );
+}
+
+/// The account's subscription bought on the website (Stripe), with its
+/// invoices, as the web app's subscription dialog shows it.
+@immutable
+class WebSubscription {
+  const WebSubscription({
+    required this.status,
+    this.plan,
+    this.amount,
+    this.currency,
+    this.interval,
+    this.currentPeriodEnd,
+    this.cancelAt,
+    this.endedAt,
+    this.invoices = const [],
+    this.test = false,
+  });
+
+  /// From Stripe's test mode (a tester's test purchase), not real money.
+  final bool test;
+
+  /// Stripe's status: active, trialing, past_due, canceled, unpaid…
+  final String status;
+  final String? plan;
+
+  /// Price per [interval] in minor units (cents).
+  final int? amount;
+  final String? currency;
+
+  /// "month" or "year".
+  final String? interval;
+
+  /// End of the period paid for: the next charge, or when Pro ends if cancelled.
+  final DateTime? currentPeriodEnd;
+
+  /// When it's set to end, or null if it renews.
+  final DateTime? cancelAt;
+
+  /// When it ended (status canceled).
+  final DateTime? endedAt;
+  final List<WebInvoice> invoices;
+
+  bool get isRunning =>
+      status == 'active' || status == 'trialing' || status == 'past_due';
+
+  /// Cancelled, but Pro runs until [cancelAt].
+  bool get isEnding => isRunning && cancelAt != null;
+
+  factory WebSubscription.fromJson(
+    Map<String, dynamic> json, {
+    bool test = false,
+  }) {
+    DateTime? date(Object? v) => v is String ? DateTime.parse(v) : null;
+    return WebSubscription(
+      test: test,
+      status: json['status'] as String,
+      plan: json['plan'] as String?,
+      amount: (json['amount'] as num?)?.toInt(),
+      currency: json['currency'] as String?,
+      interval: json['interval'] as String?,
+      currentPeriodEnd: date(json['currentPeriodEnd']),
+      cancelAt: date(json['cancelAt']),
+      endedAt: date(json['endedAt']),
+      invoices: [
+        for (final i in (json['invoices'] as List? ?? const []))
+          WebInvoice.fromJson(i as Map<String, dynamic>),
+      ],
+    );
+  }
+}
+
 /// The signed-in account, as returned by the API.
 @immutable
 class AppUser {
