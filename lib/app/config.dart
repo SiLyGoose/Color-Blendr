@@ -24,6 +24,9 @@ abstract final class AppConfig {
     defaultValue: 'ca-app-pub-9963034591853736/6738921200',
   );
 
+  /// The Color Blendr website (landing page; the web app is at /app).
+  static final websiteUrl = Uri.parse('https://color-blendr-ui.vercel.app');
+
   /// Google Play's page for managing this app's subscription.
   static final manageSubscriptionUrl = Uri.parse(
     'https://play.google.com/store/account/subscriptions?sku=pro&package=org.ColorBlendr.color_blendr',

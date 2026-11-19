@@ -5,9 +5,11 @@ import '../data/models.dart';
 import '../state/ads_controller.dart';
 import '../state/auth_controller.dart';
 import '../state/generator_controller.dart';
+import '../state/settings_controller.dart';
 import 'generator/generator_page.dart';
 import 'library/library_page.dart';
 import 'settings/settings_page.dart';
+import 'website_prompt.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -34,6 +36,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.listenManual(authProvider, (_, auth) {
       if (auth.hasValue) ref.read(adsControllerProvider.notifier).prepare();
     }, fireImmediately: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        WebsitePrompt.onLaunch(context, ref.read(sharedPreferencesProvider));
+      }
+    });
   }
 
   @override

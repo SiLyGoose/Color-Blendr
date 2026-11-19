@@ -12,6 +12,7 @@ import '../../state/library_controller.dart';
 import '../../state/settings_controller.dart';
 import '../common.dart';
 import '../pro/pro_sheet.dart';
+import '../website_prompt.dart';
 import 'subscription_sheet.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -49,6 +50,15 @@ class SettingsPage extends ConsumerWidget {
               onTap: () =>
                   ref.read(adsControllerProvider.notifier).showPrivacyOptions(),
             ),
+          const SizedBox(height: 8),
+          const _SectionHeader('More'),
+          ListTile(
+            leading: const Icon(Icons.language),
+            title: const Text('Visit our website'),
+            subtitle: const Text('Use Color Blendr on your computer too'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => openWebsite(context),
+          ),
           // Required credit for the color-name list (CC BY 2.5).
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
