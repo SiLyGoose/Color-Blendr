@@ -216,7 +216,13 @@ class _SubscriptionSheetState extends ConsumerState<_SubscriptionSheet> {
 
     return ListView(
       controller: widget.controller,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      // Scrolls clear of the system navigation bar (edge to edge).
+      padding: EdgeInsets.fromLTRB(
+        16,
+        0,
+        16,
+        24 + MediaQuery.paddingOf(context).bottom,
+      ),
       children: [
         Text('Your subscription', style: theme.textTheme.titleLarge),
         const SizedBox(height: 16),
@@ -299,7 +305,13 @@ class _ChangeOptions extends StatelessWidget {
             onTap: () => Navigator.of(context).pop(true),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          // Clear the system navigation bar (the app draws edge to edge).
+          padding: EdgeInsets.fromLTRB(
+            16,
+            8,
+            16,
+            24 + MediaQuery.paddingOf(context).bottom,
+          ),
           child: Text(
             'To switch between monthly and yearly, or to change your card, use the Color Blendr website, under Account.',
             style: theme.textTheme.bodySmall?.copyWith(

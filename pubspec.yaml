@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # <version name>+<version code>. The version code must increase for every Play upload
 # (1.1.0+6 is the last version published before the 2.0 rewrite).
-version: 2.0.0+11
+version: 2.0.0+12
 
 environment:
   sdk: ^3.13.0
