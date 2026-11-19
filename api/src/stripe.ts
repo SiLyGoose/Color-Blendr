@@ -49,6 +49,39 @@ export type CheckoutSession = {
   subscriptionId: string | null;
 };
 
+/** One invoice of a web subscription, for the history list. */
+export type Invoice = {
+  id: string;
+  /** ISO time it was created. */
+  date: string;
+  /** Total in minor units (cents). */
+  amount: number;
+  currency: string;
+  /** Stripe's invoice status: paid, open, void, uncollectible. */
+  status: string;
+  /** Whether the payment was refunded (fully or partly), when Stripe says so. */
+  refunded: boolean;
+  /** Stripe's hosted invoice page (receipt, PDF). */
+  url: string | null;
+};
+
+/** The account's web subscription, as the web app's subscription dialog shows it. */
+export type WebSubscription = {
+  /** Stripe's status: active, trialing, past_due, canceled, unpaid, incomplete… */
+  status: string;
+  plan: PlanId | null;
+  amount: number | null;
+  currency: string | null;
+  interval: "month" | "year" | null;
+  /** ISO end of the period paid for: the next charge, or when Pro ends if cancelled. */
+  currentPeriodEnd: string | null;
+  /** ISO time the subscription is set to end, or null if it renews. */
+  cancelAt: string | null;
+  /** ISO time it ended (status canceled), or null. */
+  endedAt: string | null;
+  invoices: Invoice[];
+};
+
 export interface StripeBilling {
   /** The plans on sale, cheapest commitment first. Cached for a few minutes. */
   plans(): Promise<Plan[]>;
@@ -65,6 +98,14 @@ export interface StripeBilling {
   reportToRevenueCat(userId: string, subscriptionId: string): Promise<void>;
   /** A Stripe customer-portal link for the account's subscription, or null if it has none. */
   portalUrl(userId: string, returnUrl: string): Promise<string | null>;
+  /** The account's current (or most recent) web subscription with its invoices, or null. */
+  subscription(userId: string): Promise<WebSubscription | null>;
+  /**
+   * Stops (cancel: true) or restores (false) renewal at the end of the paid
+   * period. Pro stays until then either way. Returns the subscription id, or
+   * null if the account has no running subscription.
+   */
+  setCancelAtPeriodEnd(userId: string, cancel: boolean): Promise<string | null>;
 }
 
 export class StripeError extends Error {
@@ -109,7 +150,73 @@ const searchResponse = z.object({
   data: z.array(z.object({ customer: z.union([z.string(), z.object({ id: z.string() })]) })),
 });
 
+const ts = z.number().int().nullish();
+const subscriptionResponse = z.object({
+  id: z.string(),
+  status: z.string(),
+  created: z.number().int(),
+  cancel_at: ts,
+  cancel_at_period_end: z.boolean().nullish(),
+  ended_at: ts,
+  customer: z.union([z.string(), z.object({ id: z.string() })]),
+  // Older API versions keep the period on the subscription, newer ones on the item.
+  current_period_end: ts,
+  items: z.object({
+    data: z.array(
+      z.object({
+        current_period_end: ts,
+        price: z.object({
+          id: z.string(),
+          unit_amount: z.number().int().nullable(),
+          currency: z.string(),
+          recurring: z.object({ interval: z.string() }).nullable(),
+        }),
+      }),
+    ),
+  }),
+});
+type StripeSubscription = z.infer<typeof subscriptionResponse>;
+
+const subscriptionList = z.object({ data: z.array(subscriptionResponse) });
+
+const invoiceList = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      created: z.number().int(),
+      total: z.number().int(),
+      currency: z.string(),
+      status: z.string().nullable(),
+      hosted_invoice_url: z.string().nullish(),
+      // A refund issued from the invoice shows up as a credit note.
+      post_payment_credit_notes_amount: z.number().int().nullish(),
+      // Expanded: which PaymentIntent paid it, to find refunds made from the
+      // Payments page (they're on the charge, not the invoice).
+      payments: z
+        .object({
+          data: z.array(z.object({ payment: z.object({ payment_intent: z.string().nullish() }).nullish() })),
+        })
+        .nullish(),
+    }),
+  ),
+});
+
+const chargeList = z.object({
+  data: z.array(z.object({ payment_intent: z.string().nullish(), amount_refunded: z.number().int() })),
+});
+
+/** Statuses where the subscription still runs and can be cancelled or resumed. */
+const LIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
+
+const iso = (t: number | null | undefined) => (t ? new Date(t * 1000).toISOString() : null);
+
 const PLANS_TTL_MS = 5 * 60_000;
+
+/**
+ * Pinned so a dashboard upgrade can't change the shapes parsed here (e.g.
+ * where the billing period lives). The account's version on 2026-11-19.
+ */
+const STRIPE_API_VERSION = "2025-11-17.clover";
 
 export function stripeBilling(
   cfg: StripeModeConfig,
@@ -124,6 +231,7 @@ export function stripeBilling(
       method,
       headers: {
         authorization: `Bearer ${cfg.secretKey}`,
+        "stripe-version": STRIPE_API_VERSION,
         ...(method === "POST" ? { "content-type": "application/x-www-form-urlencoded" } : {}),
       },
       body: method === "POST" && params ? formEncode(params) : undefined,
@@ -206,13 +314,7 @@ export function stripeBilling(
     },
 
     async portalUrl(userId, returnUrl) {
-      // Our id is a UUID (checked by the caller), so it's safe inside the query.
-      const found = searchResponse.parse(
-        await stripe("GET", "/v1/subscriptions/search", {
-          query: `metadata['app_user_id']:'${userId}'`,
-          limit: 1,
-        }),
-      );
+      const found = searchResponse.parse(await searchSubscriptions(userId, 1));
       const customer = found.data[0]?.customer;
       if (!customer) return null;
       const json = z.object({ url: z.string() }).parse(
@@ -223,7 +325,88 @@ export function stripeBilling(
       );
       return json.url;
     },
+
+    async subscription(userId) {
+      const sub = await findSubscription(userId);
+      if (!sub) return null;
+      const item = sub.items.data[0];
+      const price = item?.price;
+      const interval = price?.recurring?.interval;
+      const plan = PLAN_IDS.find((id) => cfg.prices[id] === price?.id) ?? null;
+      const [invoices, refunded] = await Promise.all([
+        stripe("GET", "/v1/invoices", { subscription: sub.id, limit: 24, expand: ["data.payments"] }).then(
+          (j) => invoiceList.parse(j).data,
+        ),
+        refundedPayments(sub),
+      ]);
+      return {
+        status: sub.status,
+        plan,
+        amount: price?.unit_amount ?? null,
+        currency: price?.currency ?? null,
+        interval: interval === "month" || interval === "year" ? interval : null,
+        currentPeriodEnd: iso(item?.current_period_end ?? sub.current_period_end),
+        cancelAt: iso(sub.cancel_at),
+        endedAt: iso(sub.ended_at),
+        invoices: invoices
+          .filter((i) => i.status !== "draft")
+          .map((i) => ({
+            id: i.id,
+            date: iso(i.created)!,
+            amount: i.total,
+            currency: i.currency,
+            status: i.status ?? "open",
+            refunded:
+              (i.post_payment_credit_notes_amount ?? 0) > 0 ||
+              !!i.payments?.data.some((p) => p.payment?.payment_intent && refunded.has(p.payment.payment_intent)),
+            url: i.hosted_invoice_url ?? null,
+          })),
+      };
+    },
+
+    async setCancelAtPeriodEnd(userId, cancel) {
+      const sub = await findSubscription(userId);
+      if (!sub || !LIVE_STATUSES.has(sub.status)) return null;
+      const ending = !!(sub.cancel_at || sub.cancel_at_period_end);
+      if (cancel === ending) return sub.id; // Already as asked.
+      // Newer API versions (and Stripe's portal) cancel with a cancel_at date
+      // rather than the flag; Stripe takes only one of the two per request.
+      const params = cancel
+        ? { cancel_at_period_end: "true" }
+        : sub.cancel_at_period_end
+          ? { cancel_at_period_end: "false" }
+          : { cancel_at: "" };
+      await stripe("POST", `/v1/subscriptions/${encodeURIComponent(sub.id)}`, params);
+      return sub.id;
+    },
   };
+
+  function searchSubscriptions(userId: string, limit: number) {
+    // Our id is a UUID (checked by the caller), so it's safe inside the query.
+    return stripe("GET", "/v1/subscriptions/search", { query: `metadata['app_user_id']:'${userId}'`, limit });
+  }
+
+  /** The account's running subscription, or else its most recent one. */
+  async function findSubscription(userId: string): Promise<StripeSubscription | null> {
+    const subs = subscriptionList.parse(await searchSubscriptions(userId, 10)).data;
+    const newest = [...subs].sort((a, b) => b.created - a.created);
+    return newest.find((s) => LIVE_STATUSES.has(s.status)) ?? newest[0] ?? null;
+  }
+
+  /**
+   * PaymentIntents of the customer's refunded charges. Best effort: without
+   * the Charges permission the history just doesn't mark refunds.
+   */
+  async function refundedPayments(sub: StripeSubscription): Promise<Set<string>> {
+    const customer = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+    try {
+      const charges = chargeList.parse(await stripe("GET", "/v1/charges", { customer, limit: 100 })).data;
+      return new Set(charges.flatMap((c) => (c.amount_refunded > 0 && c.payment_intent ? [c.payment_intent] : [])));
+    } catch (err) {
+      if (err instanceof StripeError && err.status === 403) return new Set();
+      throw err;
+    }
+  }
 }
 
 /**

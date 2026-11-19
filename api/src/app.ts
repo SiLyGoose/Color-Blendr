@@ -458,6 +458,8 @@ export function createApp({
     return c.json({ url });
   });
 
+  const NO_WEB_SUB = "No web subscription found for this account";
+
   const portalInput = z.object({ test: z.boolean().optional() });
 
   // A Stripe customer-portal link (cancel, change card, receipts) for the
@@ -466,8 +468,41 @@ export function createApp({
     const { test = false } = await parseOptionalBody(c, portalInput);
     const user = c.get("user");
     const url = await stripeFor(user, test).portalUrl(user.id, `${webAppUrl(c)}/account`);
-    if (!url) return c.json({ error: "No web subscription found for this account" }, 404);
+    if (!url) return c.json({ error: NO_WEB_SUB }, 404);
     return c.json({ url });
+  });
+
+
+  // The account's web subscription for the web app's subscription dialog:
+  // plan, price, next charge or end date, and invoices. ?test=1: test mode.
+  app.get("/v1/billing/subscription", requireUser, async (c) => {
+    const test = c.req.query("test") === "1";
+    const subscription = await stripeFor(c.get("user"), test).subscription(c.get("user").id);
+    if (!subscription) return c.json({ error: NO_WEB_SUB }, 404);
+    return c.json({ subscription });
+  });
+
+  const renewalInput = z.object({ cancel: z.boolean(), test: z.boolean().optional() });
+
+  // Cancels (cancel: true) or un-cancels a web subscription at the end of the
+  // period paid for; Pro stays until then. The subscription is always the
+  // signed-in account's own, found by its id in Stripe, never one the browser
+  // names. Then re-reads RevenueCat so the account shows the change right away.
+  app.post("/v1/billing/subscription", requireUser, async (c) => {
+    const { cancel, test = false } = await parseBody(c, renewalInput);
+    const user = c.get("user");
+    const s = stripeFor(user, test);
+    const subscriptionId = await s.setCancelAtPeriodEnd(user.id, cancel);
+    if (!subscriptionId) return c.json({ error: NO_WEB_SUB }, 404);
+    let updated = user;
+    try {
+      await s.reportToRevenueCat(user.id, subscriptionId);
+      updated = (await syncFromRevenueCat(billing!, user.id)) ?? user;
+    } catch (err) {
+      // Stripe has the change; the webhook brings it here shortly.
+      console.error("Re-syncing after a renewal change failed", err);
+    }
+    return c.json({ subscription: await s.subscription(user.id), user: userDto(updated, now()) });
   });
 
   // RevenueCat webhook. The payload is only a hint about whom to re-read;

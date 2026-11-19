@@ -841,6 +841,23 @@ function fakeStripe(mode: "live" | "test") {
   const created: { plan: string; userId: string; email: string; successUrl: string; cancelUrl: string }[] = [];
   const reported: [string, string][] = [];
   const sessions = new Map<string, { userId: string; status: string; subscriptionId: string | null }>();
+  /** Accounts with a running web subscription, and whether it's set to end. */
+  const subs = new Map<string, { cancelling: boolean }>();
+  const subscriptionOf = (userId: string) => {
+    const sub = subs.get(userId);
+    if (!sub) return null;
+    return {
+      status: "active",
+      plan: "monthly" as const,
+      amount: 499,
+      currency: "usd",
+      interval: "month" as const,
+      currentPeriodEnd: "2026-12-19T08:38:42.000Z",
+      cancelAt: sub.cancelling ? "2026-12-19T08:38:42.000Z" : null,
+      endedAt: null,
+      invoices: [],
+    };
+  };
   const billing: StripeBilling = {
     async plans() {
       return [
@@ -862,8 +879,17 @@ function fakeStripe(mode: "live" | "test") {
     async portalUrl(userId) {
       return [...sessions.values()].some((s) => s.userId === userId) ? "https://billing.stripe.com/p/session/x" : null;
     },
+    async subscription(userId) {
+      return subscriptionOf(userId);
+    },
+    async setCancelAtPeriodEnd(userId, cancel) {
+      const sub = subs.get(userId);
+      if (!sub) return null;
+      sub.cancelling = cancel;
+      return `sub_${userId}`;
+    },
   };
-  return { billing, created, reported, sessions };
+  return { billing, created, reported, sessions, subs };
 }
 
 describe("web checkout (Stripe)", () => {
@@ -976,6 +1002,39 @@ describe("web checkout (Stripe)", () => {
     live.sessions.set("cs_live_1", { userId: userId("alice"), status: "complete", subscriptionId: "sub_1" });
     const res = await post("/v1/billing/portal", alice);
     expect((await res.json()).url).toMatch(/^https:\/\/billing\.stripe\.com\//);
+  });
+
+  it("shows only the account's own web subscription", async () => {
+    const alice = await signIn("alice");
+    const bob = await signIn("bob");
+    live.subs.set(userId("alice"), { cancelling: false });
+    const res = await call("GET", "/v1/billing/subscription", { token: alice });
+    expect(res.status).toBe(200);
+    expect((await res.json()).subscription).toMatchObject({ plan: "monthly", cancelAt: null });
+    expect((await call("GET", "/v1/billing/subscription", { token: bob })).status).toBe(404);
+    expect((await call("GET", "/v1/billing/subscription?test=1", { token: alice })).status).toBe(403);
+  });
+
+  it("cancels and resumes at the end of the period, then re-reads RevenueCat", async () => {
+    const alice = await signIn("alice");
+    live.subs.set(userId("alice"), { cancelling: false });
+    rc.owned.set(userId("alice"), { ...weekly(), store: "stripe", willRenew: false });
+    const res = await post("/v1/billing/subscription", alice, { cancel: true });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.subscription.cancelAt).not.toBeNull();
+    expect(body.user).toMatchObject({ plan: "pro", subscription: { store: "stripe", willRenew: false } });
+    expect(live.reported).toEqual([[userId("alice"), `sub_${userId("alice")}`]]);
+
+    const resumed = await (await post("/v1/billing/subscription", alice, { cancel: false })).json();
+    expect(resumed.subscription.cancelAt).toBeNull();
+    expect((await post("/v1/billing/subscription", alice, { cancel: "yes" })).status).toBe(400);
+  });
+
+  it("can't cancel what isn't there", async () => {
+    const bob = await signIn("bob");
+    expect((await post("/v1/billing/subscription", bob, { cancel: true })).status).toBe(404);
+    expect(live.reported).toHaveLength(0);
   });
 });
 

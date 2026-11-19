@@ -88,6 +88,85 @@ describe("stripe", () => {
     expect(JSON.parse(calls[0]!.body!)).toEqual({ app_user_id: "u1", fetch_token: "sub_1" });
   });
 
+  const sub = (extra = {}) => ({
+    id: "sub_1",
+    status: "active",
+    created: 1_700_000_000,
+    customer: "cus_1",
+    cancel_at: null,
+    cancel_at_period_end: false,
+    ended_at: null,
+    items: {
+      data: [
+        {
+          current_period_end: 1_800_000_000,
+          price: { id: "price_m", unit_amount: 499, currency: "usd", recurring: { interval: "month" } },
+        },
+      ],
+    },
+    ...extra,
+  });
+
+  it("reads the subscription and its invoices, marking refunded ones", async () => {
+    const { doFetch, calls } = fakeFetch({
+      "GET /v1/subscriptions/search": { data: [sub({ id: "sub_old", status: "canceled", created: 1 }), sub()] },
+      "GET /v1/invoices": {
+        data: [
+          {
+            id: "in_2",
+            created: 1_750_000_000,
+            total: 499,
+            currency: "usd",
+            status: "paid",
+            hosted_invoice_url: "https://invoice.stripe.com/i/2",
+            payments: { data: [{ payment: { payment_intent: "pi_2" } }] },
+          },
+          { id: "in_1", created: 1_700_000_000, total: 499, currency: "usd", status: "paid", payments: { data: [] } },
+          { id: "in_draft", created: 1_760_000_000, total: 499, currency: "usd", status: "draft" },
+        ],
+      },
+      "GET /v1/charges": { data: [{ payment_intent: "pi_2", amount_refunded: 499 }] },
+    });
+    const result = await stripeBilling(cfg, { fetch: doFetch }).subscription("u1");
+    expect(result).toMatchObject({
+      status: "active",
+      plan: "monthly",
+      amount: 499,
+      interval: "month",
+      currentPeriodEnd: new Date(1_800_000_000_000).toISOString(),
+      cancelAt: null,
+    });
+    expect(result!.invoices.map((i) => [i.id, i.refunded])).toEqual([
+      ["in_2", true],
+      ["in_1", false],
+    ]);
+    expect(calls[0]!.headers["stripe-version"]).toBeTruthy();
+    expect(decodeURIComponent(calls[0]!.url)).toContain("metadata['app_user_id']:'u1'");
+  });
+
+  it("cancels with the flag, and resumes whichever way it was cancelled", async () => {
+    const run = async (current: object, cancel: boolean) => {
+      const { doFetch, calls } = fakeFetch({
+        "GET /v1/subscriptions/search": { data: [sub(current)] },
+        "POST /v1/subscriptions/sub_1": {},
+      });
+      expect(await stripeBilling(cfg, { fetch: doFetch }).setCancelAtPeriodEnd("u1", cancel)).toBe("sub_1");
+      const post = calls.find((c) => c.method === "POST");
+      return post ? Object.fromEntries(new URLSearchParams(post.body)) : null;
+    };
+    expect(await run({}, true)).toEqual({ cancel_at_period_end: "true" });
+    expect(await run({ cancel_at_period_end: true, cancel_at: 1_800_000_000 }, false)).toEqual({ cancel_at_period_end: "false" });
+    // Stripe's portal (newer API versions) sets only cancel_at.
+    expect(await run({ cancel_at: 1_800_000_000 }, false)).toEqual({ cancel_at: "" });
+    expect(await run({ cancel_at: 1_800_000_000 }, true)).toBeNull(); // Already ending.
+  });
+
+  it("won't touch a subscription that has ended", async () => {
+    const { doFetch, calls } = fakeFetch({ "GET /v1/subscriptions/search": { data: [sub({ status: "canceled" })] } });
+    expect(await stripeBilling(cfg, { fetch: doFetch }).setCancelAtPeriodEnd("u1", true)).toBeNull();
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
   it("reads mode settings from the environment and rejects mixed-up keys", () => {
     const env = {
       STRIPE_SECRET_KEY: "rk_live_abc",
