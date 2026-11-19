@@ -13,6 +13,7 @@ import '../test/palette_export_test.dart' as palette_export;
 import '../test/palette_style_test.dart' as palette_style;
 import '../test/photo_palette_test.dart' as photo_palette;
 import '../test/pro_widget_test.dart' as pro_widget;
+import '../test/review_prompt_test.dart' as review_prompt;
 import '../test/widget_test.dart' as widget;
 
 void main() {
@@ -28,5 +29,6 @@ void main() {
   palette_style.main();
   photo_palette.main();
   pro_widget.main();
+  review_prompt.main();
   widget.main();
 }

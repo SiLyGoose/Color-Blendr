@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
 import 'app/app_update.dart';
+import 'app/review_prompt.dart';
 import 'state/settings_controller.dart';
 
 const ntcLicense = '''
@@ -30,6 +31,7 @@ Future<void> main() async {
     SharedPreferences.getInstance(),
     AppUpdate.check(timeout: const Duration(seconds: 3)),
   ).wait;
+  ReviewPrompt.recordLaunch().ignore();
 
   runApp(
     // Riverpod 3 retries failed providers by default; our errors are either

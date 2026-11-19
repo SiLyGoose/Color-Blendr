@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # <version name>+<version code>. The version code must increase for every Play upload
 # (1.1.0+6 is the last version published before the 2.0 rewrite).
-version: 2.0.2+15
+version: 2.0.3+16
 
 environment:
   sdk: ^3.13.0
@@ -44,6 +44,7 @@ dependencies:
   gma_mediation_unity: 1.12.0
   gma_mediation_liftoffmonetize: 1.5.7
   in_app_update: 5.0.0
+  in_app_review: ^2.0.12
 
 dev_dependencies:
   flutter_test:

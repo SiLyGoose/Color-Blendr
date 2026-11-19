@@ -506,7 +506,14 @@ void main() {
         find.textContaining('Cancel it first in Subscription details'),
         findsOneWidget,
       );
-      expect(find.textContaining('Google Play'), findsNothing);
+      // The dialog only: the settings list behind it has "Rate Color Blendr".
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('Google Play'),
+        ),
+        findsNothing,
+      );
     });
 
     testWidgets('web subscription details: plan, next payment, invoices', (

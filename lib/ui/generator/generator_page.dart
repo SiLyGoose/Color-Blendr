@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../app/review_prompt.dart';
 import '../../data/blendr_api.dart';
 import '../../data/models.dart';
 import '../../state/ads_controller.dart';
@@ -90,6 +91,9 @@ class _GeneratorPageState extends ConsumerState<GeneratorPage> {
         HapticFeedback.lightImpact();
         if (!mounted) return;
         showMessage(context, 'Saved to library');
+        // Saving a palette they like is a good moment for Play's review
+        // card (it checks whether the user is due for one).
+        ReviewPrompt.paletteSaved().ignore();
       }
     } on ApiException catch (e) {
       if (!mounted) return;

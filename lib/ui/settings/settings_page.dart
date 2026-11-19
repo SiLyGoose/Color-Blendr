@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/config.dart';
+import '../../app/review_prompt.dart';
 import '../../data/color_source.dart';
 import '../../data/models.dart';
 import '../../state/ads_controller.dart';
@@ -58,6 +59,17 @@ class SettingsPage extends ConsumerWidget {
             subtitle: const Text('Use Color Blendr on your computer too'),
             trailing: const Icon(Icons.open_in_new),
             onTap: () => openWebsite(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.star_outline),
+            title: const Text('Rate Color Blendr'),
+            subtitle: const Text('Tell us what you think on Google Play'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () async {
+              if (!await ReviewPrompt.openStorePage() && context.mounted) {
+                showMessage(context, 'Couldn’t open Google Play');
+              }
+            },
           ),
           // Required credit for the color-name list (CC BY 2.5).
           Padding(
