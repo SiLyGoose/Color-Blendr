@@ -503,7 +503,7 @@ void main() {
       await tester.tap(find.text('Delete account'));
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('Cancel it on the Color Blendr website'),
+        find.textContaining('Cancel it first in Subscription details'),
         findsOneWidget,
       );
       expect(find.textContaining('Google Play'), findsNothing);
@@ -595,6 +595,104 @@ void main() {
         findsOneWidget,
       );
       expect(inSheet('No invoices yet.'), findsOneWidget);
+    });
+
+    Map<String, dynamic> monthly() => {
+      'status': 'active',
+      'amount': 499,
+      'currency': 'usd',
+      'interval': 'month',
+      'currentPeriodEnd': DateTime(2026, 12, 4, 12).toIso8601String(),
+      'cancelAt': null,
+      'invoices': <Object>[],
+    };
+
+    Future<void> openDetails(WidgetTester tester) async {
+      await tester.tap(find.text('Subscription details'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('cancelling from the app, after confirming', (tester) async {
+      await openSettings(tester, webSub, webSubscription: monthly());
+      await openDetails(tester);
+
+      await tester.tap(find.text('Change subscription'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'To switch between monthly and yearly, or to change your '
+          'card, use the Color Blendr website, under Account.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel subscription'));
+      await tester.pumpAndSettle();
+      expect(find.text('Cancel your subscription?'), findsOneWidget);
+
+      // Backing out changes nothing.
+      await tester.tap(find.text('Keep Pro'));
+      await tester.pumpAndSettle();
+      expect(inSheet('Active'), findsOneWidget);
+
+      await tester.tap(find.text('Change subscription'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel subscription'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Cancel subscription'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(inSheet('Cancelled'), findsOneWidget);
+      expect(
+        inSheet(
+          'Cancelled. You keep Pro until December 4, 2026, and won’t be charged again.',
+        ),
+        findsOneWidget,
+      );
+      // The Settings tile behind the sheet follows the API's new profile.
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.text('Ends on Dec 4, 2026'), findsOneWidget);
+    });
+
+    testWidgets('resuming a cancelled subscription from the app', (
+      tester,
+    ) async {
+      await openSettings(
+        tester,
+        webSub,
+        webSubscription: {
+          ...monthly(),
+          'cancelAt': DateTime(2026, 12, 4, 12).toIso8601String(),
+        },
+      );
+      await openDetails(tester);
+      await tester.tap(find.text('Change subscription'));
+      await tester.pumpAndSettle();
+      expect(find.text('Cancel subscription'), findsNothing);
+      await tester.tap(find.text('Keep my subscription'));
+      await tester.pumpAndSettle();
+
+      expect(inSheet('Active'), findsOneWidget);
+      expect(
+        inSheet('Next payment: \$4.99 on December 4, 2026.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an ended subscription has nothing to change', (tester) async {
+      await openSettings(
+        tester,
+        webSub,
+        webSubscription: {...monthly(), 'status': 'canceled'},
+      );
+      await openDetails(tester);
+      expect(inSheet('Ended'), findsOneWidget);
+      expect(find.text('Change subscription'), findsNothing);
     });
   });
   group('ads', () {

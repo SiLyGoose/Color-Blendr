@@ -48,6 +48,23 @@ class AuthController extends AsyncNotifier<AppUser?> {
     return user;
   }
 
+  /// Cancels or resumes the subscription bought on the website, keeps the
+  /// profile the API returns (renewal shown in Settings), and returns the
+  /// updated subscription.
+  Future<WebSubscription?> setWebRenewal({
+    required bool cancel,
+    required bool test,
+  }) async {
+    final result = await ref
+        .read(blendrApiProvider)
+        .setWebRenewal(cancel: cancel, test: test);
+    if (ref.mounted) {
+      await ref.read(sessionStoreProvider).updateUser(result.user);
+      if (ref.mounted) state = AsyncData(result.user);
+    }
+    return result.subscription;
+  }
+
   /// Fetches the profile (including the plan) from the API. Quietly keeps the
   /// saved one when offline.
   Future<void> refreshProfile() async {

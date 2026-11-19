@@ -84,6 +84,28 @@ class BlendrApi {
     return live ?? test;
   }
 
+  /// Cancels ([cancel] true) or resumes the web subscription at the end of
+  /// the period paid for; Pro stays until then. [test]: the subscription is
+  /// in Stripe's test mode ([WebSubscription.test]). Returns the updated
+  /// subscription and profile.
+  Future<({WebSubscription? subscription, AppUser user})> setWebRenewal({
+    required bool cancel,
+    required bool test,
+  }) async {
+    final json = await _send(
+      'POST',
+      '/v1/billing/subscription',
+      body: {'cancel': cancel, 'test': test},
+    ) as Map<String, dynamic>;
+    return (
+      subscription: switch (json['subscription']) {
+        final Map<String, dynamic> s => WebSubscription.fromJson(s, test: test),
+        _ => null,
+      },
+      user: AppUser.fromJson(json['user'] as Map<String, dynamic>),
+    );
+  }
+
   Future<WebSubscription?> _webSubscription({required bool test}) async {
     try {
       final json = await _send(

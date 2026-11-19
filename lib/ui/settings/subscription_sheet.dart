@@ -1,8 +1,10 @@
 // "Your subscription" for Pro bought on the website: plan, next payment (or
 // when Pro ends) and invoice history, like the web app's subscription dialog.
-// Read-only: changing the card, cancelling or resuming happen on the website.
-// Each settled invoice links to Stripe's hosted page (receipt and PDF). Unpaid
-// ones don't, since that page has a Pay button (Play's payments policy).
+// "Change subscription" cancels or resumes it at the end of the period paid
+// for. Switching plans and changing the card stay on the website, since they
+// charge outside Google Play (Play's payments policy). Each settled invoice
+// links to Stripe's hosted page (receipt and PDF); unpaid ones don't, since
+// that page has a Pay button.
 
 import 'dart:async';
 
@@ -11,6 +13,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models.dart';
+import '../../state/auth_controller.dart';
 import '../../state/providers.dart';
 import '../common.dart';
 
@@ -98,6 +101,73 @@ class _SubscriptionSheetState extends ConsumerState<_SubscriptionSheet> {
 
   bool get _waiting => _loaded && _sub == null && _checks < _searchChecks;
 
+  bool _saving = false;
+
+  /// "Change subscription": cancel, or keep a cancelled one.
+  Future<void> _change() async {
+    final sub = _sub;
+    if (sub == null) return;
+    final cancel = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) => _ChangeOptions(sub: sub),
+    );
+    if (cancel == null || !mounted) return;
+    if (cancel && !await _confirmCancel(sub)) return;
+
+    setState(() => _saving = true);
+    try {
+      final updated = await ref
+          .read(authProvider.notifier)
+          .setWebRenewal(cancel: cancel, test: sub.test);
+      if (!mounted) return;
+      if (updated != null) setState(() => _sub = updated);
+      showMessage(
+        context,
+        cancel ? 'Subscription cancelled' : 'Your subscription will renew',
+      );
+    } catch (e) {
+      if (mounted) showMessage(context, describeError(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<bool> _confirmCancel(WebSubscription sub) async {
+    final end = sub.currentPeriodEnd;
+    final until = end != null
+        ? ' until ${longDate(end)}'
+        : ' until the end of this period';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          title: const Text('Cancel your subscription?'),
+          content: Text(
+            'You won’t be charged again, and you keep Pro$until. You can change your mind before then.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Keep Pro'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Cancel subscription'),
+            ),
+          ],
+        );
+      },
+    );
+    return ok ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -134,16 +204,13 @@ class _SubscriptionSheetState extends ConsumerState<_SubscriptionSheet> {
       ];
     } else {
       body = [
-        _PlanCard(sub: _sub!),
+        _PlanCard(
+          sub: _sub!,
+          saving: _saving,
+          onChange: _sub!.isRunning ? _change : null,
+        ),
         const SizedBox(height: 16),
         _InvoiceCard(invoices: _sub!.invoices),
-        const SizedBox(height: 16),
-        Text(
-          'To change your card, cancel or resume, go to the Color Blendr website and open Account.',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
       ];
     }
 
@@ -187,9 +254,71 @@ class _TryAgain extends StatelessWidget {
   );
 }
 
-class _PlanCard extends StatelessWidget {
-  const _PlanCard({required this.sub});
+/// The choices behind "Change subscription". Pops true to cancel, false to
+/// keep (resume) a cancelled one.
+class _ChangeOptions extends StatelessWidget {
+  const _ChangeOptions({required this.sub});
   final WebSubscription sub;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final end = sub.cancelAt ?? sub.currentPeriodEnd;
+    final price = formatMoney(sub.amount, sub.currency);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text('Change subscription', style: theme.textTheme.titleLarge),
+        ),
+        if (sub.isEnding)
+          ListTile(
+            leading: const Icon(Icons.autorenew),
+            title: const Text('Keep my subscription'),
+            subtitle: Text(
+              end == null
+                  ? 'It renews automatically, and you keep Pro.'
+                  : 'It renews on ${longDate(end)}${price.isEmpty ? '' : ' for $price'}, and you keep Pro.',
+            ),
+            onTap: () => Navigator.of(context).pop(false),
+          )
+        else
+          ListTile(
+            iconColor: scheme.error,
+            textColor: scheme.error,
+            leading: const Icon(Icons.cancel_outlined),
+            title: const Text('Cancel subscription'),
+            subtitle: Text(
+              end == null
+                  ? 'You won’t be charged again.'
+                  : 'You keep Pro until ${longDate(end)}, and won’t be charged again.',
+            ),
+            onTap: () => Navigator.of(context).pop(true),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Text(
+            'To switch between monthly and yearly, or to change your card, use the Color Blendr website, under Account.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  const _PlanCard({required this.sub, this.saving = false, this.onChange});
+  final WebSubscription sub;
+  final bool saving;
+
+  /// Null hides "Change subscription" (it has ended).
+  final VoidCallback? onChange;
 
   @override
   Widget build(BuildContext context) {
@@ -285,6 +414,13 @@ class _PlanCard extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ],
+            if (onChange != null) ...[
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: saving ? null : onChange,
+                child: Text(saving ? 'Saving…' : 'Change subscription'),
               ),
             ],
           ],

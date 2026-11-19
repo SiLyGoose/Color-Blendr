@@ -326,8 +326,8 @@ class _SignedInState extends ConsumerState<_SignedIn> {
                 const SizedBox(height: 12),
                 Text(
                   'Deleting your account doesn’t cancel your subscription. '
-                  'Cancel it on the Color Blendr website, under Account, to '
-                  'stop being charged.',
+                  'Cancel it first in Subscription details, or on the Color '
+                  'Blendr website, to stop being charged.',
                   style: TextStyle(color: scheme.error),
                 ),
               ],

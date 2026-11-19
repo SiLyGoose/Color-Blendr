@@ -163,6 +163,24 @@ class FakeServer {
           return _json({'error': 'No web subscription found'}, 404);
         }
         return _json({'subscription': sub});
+      case ('POST', '/v1/billing/subscription'):
+        final sub = webSubscription;
+        if (sub == null) {
+          return _json({'error': 'No web subscription found'}, 404);
+        }
+        final cancel = body['cancel'] == true;
+        sub['cancelAt'] = cancel ? sub['currentPeriodEnd'] : null;
+        final purchase = storePurchase;
+        if (purchase != null) {
+          storePurchase = StoreSubscription(
+            productId: purchase.productId,
+            expiresAt: purchase.expiresAt,
+            willRenew: !cancel,
+            billingIssue: purchase.billingIssue,
+            store: purchase.store,
+          );
+        }
+        return _json({'subscription': sub, 'user': user});
       case ('GET', '/v1/me'):
         return _json(user);
       case ('GET', '/v1/palettes'):
