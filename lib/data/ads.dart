@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:gma_mediation_liftoffmonetize/gma_mediation_liftoffmonetize.dart';
 import 'package:gma_mediation_unity/gma_mediation_unity.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -98,14 +99,15 @@ class AdMobAds implements Ads {
     }
   }
 
-  /// AdMob mediation: Unity Ads competes with Google for each ad (bidding is
-  /// set up in the AdMob console). Its adapter picks up GDPR consent from the
-  /// consent form by itself, but the US-state "do not sell or share" choice
-  /// must be handed to it.
+  /// AdMob mediation: Unity Ads and Liftoff Monetize compete with Google for
+  /// each ad (bidding is set up in the AdMob console). Their adapters pick up
+  /// GDPR consent from the consent form by themselves, but the US-state "do
+  /// not sell or share" choice must be handed to each one.
   Future<void> _passUsPrivacyToNetworks() async {
     try {
       final optedOut = usPrivacyOptOut(await readIabStrings());
       await GmaMediationUnity().setCCPAConsent(!optedOut);
+      await GmaMediationLiftoffmonetize().setCCPAStatus(!optedOut);
     } catch (e) {
       debugPrint('Mediation privacy settings: $e');
     }

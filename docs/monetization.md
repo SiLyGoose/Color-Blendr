@@ -199,8 +199,9 @@ product. Pro accounts never load the ad SDK or see the consent form.
 | Counting, pacing, Pro check | `lib/state/ads_controller.dart` |
 | Ad, then the offer | `_generateByUser` in `lib/ui/generator/generator_page.dart` |
 | "Ad privacy choices" (EEA/UK only) | `lib/ui/settings/settings_page.dart` |
-| Unity Ads mediation adapter | `pubspec.yaml` (`gma_mediation_unity`, pinned to a version that matches `google_mobile_ads`) |
-| US "do not sell or share" choice, passed to Unity | `lib/data/us_privacy.dart`, read through the `privacy` channel in `MainActivity.kt` |
+| Unity Ads and Liftoff Monetize mediation adapters | `pubspec.yaml` (`gma_mediation_unity`, `gma_mediation_liftoffmonetize`, pinned to versions that match `google_mobile_ads`) |
+| R8 rules for OkHttp (from the Liftoff SDK) | `android/app/proguard-rules.pro` |
+| US "do not sell or share" choice, passed to Unity and Liftoff | `lib/data/us_privacy.dart`, read through the `privacy` channel in `MainActivity.kt` |
 
 **Mediation (Unity Ads, added 2026-11-19).** Unity Ads bids against Google for
 each interstitial through AdMob mediation. The adapter registers itself, so
@@ -218,6 +219,16 @@ app-ads.txt lines are in the Color-Blendr-UI repo (`site/app-ads.txt`), and
 the privacy policy there names Unity. Also add **Unity Ads** to the ad partners
 in both AdMob Privacy & messaging messages, and check fill with AdMob →
 Mediation → Ad inspector on a test device.
+
+**Liftoff Monetize (added 2026-11-19)** works the same way: the app passes the
+US opt-out with `setCCPAStatus`. Liftoff dashboard: Color Blendr is its own
+Android app, app id `6aff31f09dacaf6546996601`, interstitial placement
+`v1-generate` (reference id `V1_GENERATE-6268923`), in-app bidding on. Ignore
+Liftoff's "download the SDK" steps: the adapter brings the SDK. In AdMob, add
+it under **Bidding → Liftoff Monetize** in the interstitial mediation group
+(it also asks for Liftoff's reporting API key), and add **Liftoff** to the ad
+partners in both Privacy & messaging messages. Its app-ads.txt line
+(`vungle.com, …`) is in `site/app-ads.txt`, and the privacy policy names it.
 
 Setup before release:
 

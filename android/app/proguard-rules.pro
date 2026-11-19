@@ -7,3 +7,10 @@
 # of androidx.work.impl.WorkDatabase" (Play pre-launch report, 2.0.0+9).
 -keep class * extends androidx.room.RoomDatabase { <init>(); }
 -keep class * extends androidx.work.InputMerger { <init>(); }
+
+# OkHttp (brought in by the Liftoff Monetize ad SDK) supports optional TLS
+# libraries the app doesn't include. It only uses them when they're present,
+# so R8 can ignore the missing classes. Without these, the release build fails.
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**
