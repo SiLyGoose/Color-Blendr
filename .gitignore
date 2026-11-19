@@ -46,3 +46,6 @@ app.*.map.json
 # Signature
 *.jks
 *.jks.old
+# Release settings (RevenueCat goog_ key) and build outputs: see tools/build_aab.ps1
+/tools/release-config.json
+/outputs/

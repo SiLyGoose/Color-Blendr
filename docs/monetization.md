@@ -99,7 +99,7 @@ a fast schedule. Test Store purchases are free, so:
 
 - **The production API ignores them**, except on accounts listed in `REVENUECAT_TESTER_EMAILS`. For those accounts it counts sandbox purchases from any store. Put only your own Google accounts there.
 - **The test key must never be in a release build.** The SDK crashes on purpose in a release build that has a Test Store key. Play's internal, closed and open testing builds are release builds, so test those with the `goog_…` key and Play license testers.
-- Pass the key per build instead of hard-coding it: `flutter run --dart-define=REVENUECAT_GOOGLE_KEY=test_…` for debug, and `--dart-define=REVENUECAT_GOOGLE_KEY=goog_…` for release.
+- The key is passed per build, never hard-coded: `flutter run --dart-define=REVENUECAT_GOOGLE_KEY=test_…` for debug. Release builds get the `goog_…` key from `tools/release-config.json` (copy `tools/release-config.example.json`; the file stays out of git). Build with `powershell -File tools\build_aab.ps1` (Play bundle, obfuscated, to `outputs/aab/`) or `tools\build_apk.ps1` (APK for your phone, to `outputs/apk/`). Both refuse a missing, placeholder or non-`goog_` key. The key is Color Blendr's own, from RevenueCat → Project → API keys → the Color Blendr Play Store app; Tidy Town's key is a different app and won't work.
 - If a purchase doesn't unlock Pro, check the API logs. The API logs a line like `Ignoring "color_blendr_pro" entitlement (…): store … not allowed` that says exactly why.
 
 ---
@@ -167,8 +167,8 @@ offline. **No app can fully prevent this**, whatever the payment provider.
 What raises the cost:
 
 1. **Obfuscate release builds** (cheap, do it now):
-   `flutter build appbundle --obfuscate --split-debug-info=build/symbols`
-   Keep `build/symbols` for each release so you can read crash stack traces.
+   `tools\build_aab.ps1` does this, with `--split-debug-info=outputs/symbols/v<version>`.
+   Keep `outputs/symbols/` for each release so you can read crash stack traces.
 2. **Play Integrity API** (optional, later). The app asks Google for a signed
    verdict, and the API checks it server-side via `decodeIntegrityToken`. A
    re-signed APK fails `appRecognitionVerdict == PLAY_RECOGNIZED`. Use it to
