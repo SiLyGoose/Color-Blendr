@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'app/app_update.dart';
 import 'state/settings_controller.dart';
 
 const ntcLicense = '''
@@ -23,7 +24,12 @@ Future<void> main() async {
     ),
   );
 
-  final prefs = await SharedPreferences.getInstance();
+  // Ask Google Play for a newer version while the launch screen is still up,
+  // so a required update shows the update page before the app opens.
+  final (prefs, _) = await (
+    SharedPreferences.getInstance(),
+    AppUpdate.check(timeout: const Duration(seconds: 3)),
+  ).wait;
 
   runApp(
     // Riverpod 3 retries failed providers by default; our errors are either
