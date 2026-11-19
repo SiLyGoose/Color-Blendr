@@ -2,10 +2,11 @@
 //
 // Trust model (see docs/monetization.md):
 // - The apps never tell the API that a user has paid. Android buys through
-//   Google Play Billing and the web app through RevenueCat Web Billing (Stripe),
-//   both with RevenueCat's SDKs. RevenueCat validates each purchase with the
-//   store, and the API then asks RevenueCat (with the secret key, which never
-//   ships in an app) what the customer owns.
+//   Google Play Billing (RevenueCat's SDK) and the web app through Stripe
+//   Checkout, which RevenueCat's Stripe integration tracks (see stripe.ts).
+//   RevenueCat validates each purchase with the store, and the API then asks
+//   RevenueCat (with the secret key, which never ships in an app) what the
+//   customer owns.
 // - Webhooks only say "something changed for this customer". The handler
 //   re-reads the customer from RevenueCat instead of trusting the payload, so a
 //   forged or replayed webhook can't grant anything, and late or out-of-order
@@ -23,9 +24,9 @@ export type StoreEntitlement = {
   productId: string | null;
   willRenew: boolean;
   billingIssue: boolean;
-  /** RevenueCat's store name: "play_store", "rc_billing" (web), "promotional"… */
+  /** RevenueCat's store name: "play_store", "stripe" (web), "promotional"… */
   store: string | null;
-  /** Where the customer manages the subscription (Google Play, or RevenueCat's web portal). */
+  /** Where the customer manages the subscription (Google Play, or Stripe's customer portal). */
   managementUrl: string | null;
 };
 
@@ -110,7 +111,7 @@ export type RevenueCatOptions = {
   /**
    * Stores whose sandbox (test) purchases count for everyone. Only safe where
    * the store itself limits who can test: on Google Play, only license testers
-   * listed in Play Console can. Never "rc_billing": anyone with the web
+   * listed in Play Console can. Never "stripe" or "rc_billing": anyone with a web
    * sandbox key and a Stripe test card could get Pro for free. Testers'
    * sandbox purchases count from any store (EntitlementContext.tester).
    */

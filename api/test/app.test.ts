@@ -7,6 +7,7 @@ import { NO_ENTITLEMENT, type BillingProvider, type StoreEntitlement } from "../
 import type { BillingEventRow, FolderRow, PaletteRow, UserRow } from "../src/db/schema";
 import { FREE_PALETTE_LIMIT } from "../src/plan";
 import type { Store } from "../src/store";
+import type { StripeBilling } from "../src/stripe";
 
 type SessionRow = { userId: string; tokenHash: string; expiresAt: Date };
 
@@ -832,6 +833,149 @@ describe("billing", () => {
     const token = await signIn("alice");
     expect((await call("POST", "/v1/billing/sync", { token })).status).toBe(503);
     expect((await webhook({ id: "e1", type: "TEST" })).status).toBe(503);
+  });
+});
+
+/** Stripe stand-in: one mode's checkouts, sessions and receipts posted to RevenueCat. */
+function fakeStripe(mode: "live" | "test") {
+  const created: { plan: string; userId: string; email: string; successUrl: string; cancelUrl: string }[] = [];
+  const reported: [string, string][] = [];
+  const sessions = new Map<string, { userId: string; status: string; subscriptionId: string | null }>();
+  const billing: StripeBilling = {
+    async plans() {
+      return [
+        { id: "monthly", amount: 499, currency: "usd", interval: "month" },
+        { id: "yearly", amount: 3599, currency: "usd", interval: "year" },
+      ];
+    },
+    async createCheckout(input) {
+      created.push(input);
+      return `https://checkout.stripe.com/c/pay/cs_${mode}_1`;
+    },
+    async getCheckout(id) {
+      const s = sessions.get(id);
+      return s ?? { userId: null, status: null, subscriptionId: null };
+    },
+    async reportToRevenueCat(userId, subscriptionId) {
+      reported.push([userId, subscriptionId]);
+    },
+    async portalUrl(userId) {
+      return [...sessions.values()].some((s) => s.userId === userId) ? "https://billing.stripe.com/p/session/x" : null;
+    },
+  };
+  return { billing, created, reported, sessions };
+}
+
+describe("web checkout (Stripe)", () => {
+  const WEB = "https://color-blendr-ui.vercel.app";
+  let rc: ReturnType<typeof fakeRevenueCat>;
+  let live: ReturnType<typeof fakeStripe>;
+  let test: ReturnType<typeof fakeStripe>;
+  let clock: number;
+
+  beforeEach(() => {
+    rc = fakeRevenueCat();
+    live = fakeStripe("live");
+    test = fakeStripe("test");
+    clock = Date.now();
+    app = createApp({
+      store: db.store,
+      verifyGoogleToken,
+      billing: { provider: rc.provider, webhookSecret: WEBHOOK_SECRET, testerEmails: new Set(["tester@example.com"]) },
+      webOrigins: new Set([WEB]),
+      stripe: { live: live.billing, test: test.billing },
+      now: () => new Date(clock),
+    });
+  });
+
+  const userId = (who: string) => db.users.find((u) => u.email === `${who}@example.com`)!.id;
+
+  function post(path: string, token: string, body?: unknown, origin = WEB) {
+    return app.request(path, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  it("lists the plans, and nothing when Stripe isn't set up", async () => {
+    const token = await signIn("alice");
+    const res = await call("GET", "/v1/billing/plans", { token });
+    expect((await res.json()).plans.map((p: { id: string }) => p.id)).toEqual(["monthly", "yearly"]);
+
+    app = createApp({
+      store: db.store,
+      verifyGoogleToken,
+      billing: { provider: rc.provider, webhookSecret: WEBHOOK_SECRET },
+    });
+    expect(await (await call("GET", "/v1/billing/plans", { token })).json()).toEqual({ plans: [], test: false });
+  });
+
+  it("starts a checkout tied to the signed-in account, returning to the web app", async () => {
+    const token = await signIn("alice");
+    const res = await post("/v1/billing/checkout", token, { plan: "yearly" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).url).toMatch(/^https:\/\/checkout\.stripe\.com\//);
+    expect(live.created).toEqual([
+      {
+        plan: "yearly",
+        userId: userId("alice"),
+        email: "alice@example.com",
+        successUrl: `${WEB}/app/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${WEB}/app/?checkout=cancelled`,
+      },
+    ]);
+  });
+
+  it("refuses unknown plans, unknown origins and accounts that already have Pro", async () => {
+    const token = await signIn("alice");
+    expect((await post("/v1/billing/checkout", token, { plan: "lifetime" })).status).toBe(400);
+    expect((await post("/v1/billing/checkout", token, { plan: "monthly" }, "https://evil.example")).status).toBe(400);
+    rc.owned.set(userId("alice"), weekly());
+    await call("POST", "/v1/billing/sync", { token });
+    const res = await post("/v1/billing/checkout", token, { plan: "monthly" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("already_pro");
+    expect(live.created).toHaveLength(0);
+  });
+
+  it("test mode is for tester accounts only", async () => {
+    const alice = await signIn("alice");
+    const tester = await signIn("tester");
+    expect((await post("/v1/billing/checkout", alice, { plan: "monthly", test: true })).status).toBe(403);
+    expect((await call("GET", "/v1/billing/plans?test=1", { token: alice })).status).toBe(403);
+    expect((await post("/v1/billing/checkout", tester, { plan: "monthly", test: true })).status).toBe(200);
+    expect(test.created).toHaveLength(1);
+    expect(live.created).toHaveLength(0);
+  });
+
+  it("after checkout, reports the account's own paid session to RevenueCat, then reads Pro from RevenueCat", async () => {
+    const token = await signIn("alice");
+    live.sessions.set("cs_live_1", { userId: userId("alice"), status: "complete", subscriptionId: "sub_1" });
+    rc.owned.set(userId("alice"), { ...weekly(), store: "stripe", productId: "prod_yearly" });
+    const body = await (await post("/v1/billing/sync", token, { checkoutSessionId: "cs_live_1" })).json();
+    expect(live.reported).toEqual([[userId("alice"), "sub_1"]]);
+    expect(body).toMatchObject({ plan: "pro", subscription: { store: "stripe" } });
+  });
+
+  it("won't report someone else's or an unpaid checkout", async () => {
+    const alice = await signIn("alice");
+    await signIn("bob");
+    live.sessions.set("cs_live_bob", { userId: userId("bob"), status: "complete", subscriptionId: "sub_b" });
+    live.sessions.set("cs_live_open", { userId: userId("alice"), status: "open", subscriptionId: null });
+    expect((await post("/v1/billing/sync", alice, { checkoutSessionId: "cs_live_bob" })).status).toBe(404);
+    clock += SYNC_COOLDOWN_MS;
+    expect((await post("/v1/billing/sync", alice, { checkoutSessionId: "cs_live_open" })).status).toBe(200);
+    expect((await post("/v1/billing/sync", alice, { checkoutSessionId: "not-a-session" })).status).toBe(400);
+    expect(live.reported).toHaveLength(0);
+  });
+
+  it("opens the Stripe customer portal only for an account with a web subscription", async () => {
+    const alice = await signIn("alice");
+    expect((await post("/v1/billing/portal", alice)).status).toBe(404);
+    live.sessions.set("cs_live_1", { userId: userId("alice"), status: "complete", subscriptionId: "sub_1" });
+    const res = await post("/v1/billing/portal", alice);
+    expect((await res.json()).url).toMatch(/^https:\/\/billing\.stripe\.com\//);
   });
 });
 

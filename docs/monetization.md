@@ -1,8 +1,9 @@
 # Monetization: Color Blendr Pro
 
-Pro is sold on Google Play as **Monthly** and **Yearly** subscriptions plus a
-one-time **Lifetime** unlock. Purchases go through **Google Play Billing** and
-are verified by **RevenueCat**. All three grant the RevenueCat entitlement
+Pro is sold as **Monthly** ($4.99) and **Yearly** ($35.99) subscriptions, on
+Google Play and on the web (Stripe Checkout, §6). There's no lifetime option
+(dropped 2026-11-19; the API still handles one-time purchases). Purchases are
+verified by **RevenueCat**, and both grant the RevenueCat entitlement
 **`color_blendr_pro`**. The Color Blendr API is the only thing
 that decides whether an account has Pro.
 
@@ -55,7 +56,7 @@ and the `billing` block in `api/test/app.test.ts`. The SQL path in
 1. **Payments profile / merchant account**: Settings → Payments profile. Needed before you can sell anything.
 2. **Create the products**: Monetize → Products.
    - Subscriptions → Create: one subscription `pro` with two auto-renewing base plans, `monthly` (1 month) and `yearly` (1 year). RevenueCat names them `pro:monthly` and `pro:yearly`. Optional: a free-trial offer with eligibility "New customer acquisition → never had this subscription".
-   - In-app products → Create: a one-time product `lifetime`.
+   - No lifetime product (dropped 2026-11-19). Prices: `monthly` $4.99, `yearly` $35.99.
 3. **License testers**: Settings → License testing. Add your Google account(s). Their purchases are free test purchases that renew fast (a monthly sub renews every 5 minutes).
 4. Upload a build that includes the billing library (the RevenueCat SDK adds it) to the **internal testing** track. Play doesn't show products to an app that has never shipped billing.
 
@@ -66,8 +67,8 @@ and the `billing` block in `api/test/app.test.ts`. The SQL path in
 ### RevenueCat
 7. Create a project and add a **Google Play app** with package `org.ColorBlendr.color_blendr`.
 8. Upload the service-account JSON from step 5 and connect RTDN (step 6).
-9. **Entitlement** `color_blendr_pro`. Attach `pro:monthly`, `pro:yearly` and `lifetime`. Do the same for the Test Store products `monthly`, `yearly` and `lifetime`.
-10. **Offering** `default` (mark it current) with packages `$rc_monthly` → monthly, `$rc_annual` → yearly, `$rc_lifetime` → lifetime. Attach a RevenueCat Paywall to it if the app uses RevenueCat's paywall UI.
+9. **Entitlement** `color_blendr_pro`. Attach `pro:monthly` and `pro:yearly`. Do the same for the Test Store products `monthly` and `yearly`.
+10. **Offering** `default` (mark it current) with packages `$rc_monthly` → monthly and `$rc_annual` → yearly. No `$rc_lifetime` package: the app shows every package in the offering. Attach a RevenueCat Paywall to it if the app uses RevenueCat's paywall UI.
 11. Project settings → **Restore behavior / transfer behavior: "Keep with original App User ID"**. This stops one subscription from unlocking several accounts (see §4).
 12. **Webhook**: Integrations → Webhooks → add
     - URL: `https://br-empty-smoke-bc031jex-api.compute.c-16.us-east-1.aws.neon.tech/v1/billing/revenuecat`
@@ -216,25 +217,22 @@ Setup before release:
    and app interactions, and shares them for advertising.
 7. Don't click your own live ads. Add your phone as a test device in AdMob.
 
-## 6. Selling on the web (RevenueCat Web Billing, added 2026-11-17)
+## 6. Selling on the web (Stripe Checkout, changed 2026-11-19)
 
-The web app (repo Color-Blendr-UI, `/app`) sells Pro through RevenueCat Web Billing. RevenueCat's checkout runs on the page and Stripe processes the payment. Purchases are made under our account id, so it's the **same RevenueCat customer and entitlement** (`color_blendr_pro`) as on Android. Pro bought on either platform works on both, and the API stays the only judge.
+The web app (repo Color-Blendr-UI, `/app`) sells Pro on **Stripe's own Checkout page** (checkout.stripe.com), which buyers recognize. On 2026-11-17 it used RevenueCat Web Billing's on-page checkout instead; the user switched on 2026-11-19 for the familiar Stripe page. Plans: **monthly $4.99** and **yearly $35.99** (shown as $2.99/month, billed annually). **No lifetime** anywhere, Play included.
 
-- The API stores which store the purchase came from (`users.store_name`: `play_store` or `rc_billing`) and RevenueCat's management link (`store_management_url`). Both come back as `subscription.store` and `subscription.managementUrl` (migration 0003).
-- Web: "Manage subscription" opens RevenueCat's customer portal (cancel, update the card, invoices).
-- Android: for a web purchase, the app says where to manage it ("on the Color Blendr website, under Account") **with no link**. Play's payments policy limits steering people from the app to other ways to pay.
-- Deleting an account doesn't cancel a web subscription either; both apps and `/delete-account` say so.
+How it fits together (code: `api/src/stripe.ts`, routes in `api/src/app.ts`):
+1. The Pro dialog loads plans from `GET /v1/billing/plans`. The API reads them from the Stripe prices in `STRIPE_PRICE_MONTHLY` / `STRIPE_PRICE_YEARLY`. No plans (Stripe not configured): the dialog points to Google Play.
+2. "Continue" calls `POST /v1/billing/checkout {plan}`. The API creates the Checkout Session for the signed-in account: `client_reference_id`, and `app_user_id` in both the session and subscription metadata, all set to our account id. The email is fixed to the Google account. The browser goes to Stripe.
+3. Stripe sends the buyer back to `/app/account?checkout=success&session_id=…`. The web app calls `POST /v1/billing/sync {checkoutSessionId}`. The API checks that the session is this account's and paid, posts the subscription to RevenueCat (`POST /v1/receipts`, `X-Platform: stripe`, the Stripe config's public key), then reads the entitlement back from RevenueCat as usual.
+4. RevenueCat's Stripe integration also picks the purchase up from Stripe's notifications using the `app_user_id` metadata. That covers buyers who close the tab before returning, and later renewals, cancellations and refunds. Its events reach the existing webhook.
 
-### Setup checklist (web)
-1. **Stripe**: create an account and finish activation (business details, bank account, statement descriptor such as `COLORBLENDR`). Stripe requires a public website with a contact email and a refund policy. The site has the contact email but **no Terms of Service or refund policy yet**: add them before going live.
-2. **RevenueCat → Project settings → Apps → + New → Web Billing (RevenueCat Billing)**. Connect your Stripe account. Set the app name, support email, and default currency.
-3. **Products** in that Web Billing app: monthly and yearly subscriptions plus a one-time lifetime product, with prices. Use any ids (e.g. `pro_monthly_web`, `pro_yearly_web`, `pro_lifetime_web`).
-4. **Entitlement `color_blendr_pro`**: attach the three web products.
-5. **Default offering**: add each web product to the existing `$rc_monthly`, `$rc_annual`, and `$rc_lifetime` packages. A package holds one product per app, so Android and the web share the same offering.
-6. **API keys**: copy the Web Billing **public** key (`rcb_…`) and the **sandbox** key (`rcb_sb_…`). In Vercel, set `VITE_REVENUECAT_WEB_KEY` to `rcb_…` for Production and to `rcb_sb_…` for Preview. Locally, put the sandbox key in `Color-Blendr-UI/.env.local`.
-7. **Customer portal and emails**: check that RevenueCat's Web Billing customer portal and receipt emails are on (Web Billing app settings).
-8. **Tax**: decide whether to turn on Stripe Tax (EU VAT, US sales tax). As the merchant of record on the web, you're responsible for tax there; Google handles it on Play.
-9. **Test**: use the sandbox key and a Stripe test card (`4242 4242 4242 4242`, any future date, any CVC) on `localhost:5173/app` or a Vercel preview, signed in with an account in `REVENUECAT_TESTER_EMAILS`. Then check `scripts/plan-state.mjs`: `store_name` should be `rc_billing`.
+- Same RevenueCat customer and entitlement (`color_blendr_pro`) as Android, so Pro bought on either works on both. RevenueCat reports the store as `stripe`, and `REVENUECAT_ALLOWED_STORES` includes it. Stripe test-mode purchases count only for `REVENUECAT_TESTER_EMAILS`; never put `stripe` in the sandbox list.
+- Test mode: the web app asks for Stripe test mode on every host except the live site (localhost, Vercel previews). The API allows it only for tester accounts, and only if the `STRIPE_TEST_*` variables are set.
+- Web "Manage subscription" calls `POST /v1/billing/portal`, which opens Stripe's customer portal (cancel, change card, invoices). The API finds the customer by searching Stripe subscriptions for the account id.
+- Android: a web purchase shows "Bought on the web" with **no link** (Play's payments policy).
+- Deleting an account doesn't cancel a web subscription; both apps and `/delete-account` say so.
+- Setup steps: `docs/web-launch-handoff.md`.
 
 ## 7. Notes and later options
 

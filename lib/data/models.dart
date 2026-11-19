@@ -211,7 +211,7 @@ class StoreSubscription {
   /// The store couldn't charge the user (they keep Pro during the grace period).
   final bool billingIssue;
 
-  /// RevenueCat's store: "play_store", "rc_billing" (bought on the website),
+  /// RevenueCat's store: "play_store", "stripe" (bought on the website),
   /// "promotional"… Null from older API versions, which only sold on Play.
   final String? store;
 

@@ -40,9 +40,30 @@ export default defineConfig({
         // that's safe. Never add rc_billing: anyone with the web sandbox key and
         // a Stripe test card could buy. Testers' sandbox purchases count anyway.
         REVENUECAT_SANDBOX_STORES: "play_store",
-        // play_store = Android, rc_billing = the web app (RevenueCat Web
-        // Billing), promotional = grants made in the RevenueCat dashboard.
-        REVENUECAT_ALLOWED_STORES: "play_store,rc_billing,promotional",
+        // play_store = Android, stripe = the web app (Stripe Checkout, tracked
+        // by RevenueCat's Stripe integration), rc_billing = RevenueCat Web
+        // Billing (no longer sold; kept so any earlier purchase still counts),
+        // promotional = grants made in the RevenueCat dashboard. Never add
+        // stripe to the sandbox list: test-card purchases count for testers only.
+        REVENUECAT_ALLOWED_STORES: "play_store,stripe,rc_billing,promotional",
+
+        // --- Web sales: Stripe Checkout. See docs/web-launch-handoff.md. ----
+        // All optional and read from api/.env.local. Without the live set, the
+        // web app shows "Get Pro on Google Play". The test set (Stripe test
+        // mode or a Stripe sandbox) is used from localhost and Vercel previews,
+        // by tester accounts only.
+        STRIPE_SECRET_KEY: { value: process.env.STRIPE_SECRET_KEY, required: false },
+        STRIPE_PRICE_MONTHLY: { value: process.env.STRIPE_PRICE_MONTHLY, required: false },
+        STRIPE_PRICE_YEARLY: { value: process.env.STRIPE_PRICE_YEARLY, required: false },
+        // Public key of the Stripe config in RevenueCat (for POST /v1/receipts).
+        REVENUECAT_STRIPE_KEY: { value: process.env.REVENUECAT_STRIPE_KEY, required: false },
+        STRIPE_TEST_SECRET_KEY: { value: process.env.STRIPE_TEST_SECRET_KEY, required: false },
+        STRIPE_TEST_PRICE_MONTHLY: { value: process.env.STRIPE_TEST_PRICE_MONTHLY, required: false },
+        STRIPE_TEST_PRICE_YEARLY: { value: process.env.STRIPE_TEST_PRICE_YEARLY, required: false },
+        REVENUECAT_STRIPE_TEST_KEY: {
+          value: process.env.REVENUECAT_STRIPE_TEST_KEY,
+          required: false,
+        },
       },
     },
   },

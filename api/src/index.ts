@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { createApp, type BillingDeps } from "./app";
 import { googleIdTokenVerifier } from "./auth";
 import { revenueCatProvider } from "./billing";
+import { stripeBilling, stripeConfigFromEnv, type StripeBilling, type StripeMode } from "./stripe";
 import { drizzleStore } from "./store";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -53,7 +54,7 @@ function billingFromEnv(env: NodeJS.ProcessEnv): BillingDeps | undefined {
       secretKey,
       entitlementId: env.REVENUECAT_ENTITLEMENT_ID || "pro",
       sandboxStores: list(env.REVENUECAT_SANDBOX_STORES ?? "play_store"),
-      allowedStores: list(env.REVENUECAT_ALLOWED_STORES || "play_store,rc_billing,promotional"),
+      allowedStores: list(env.REVENUECAT_ALLOWED_STORES || "play_store,stripe,rc_billing,promotional"),
     }),
   };
 }
@@ -66,9 +67,17 @@ const webOrigins = new Set(
     .filter(Boolean),
 );
 
+/** Stripe Checkout for the web app, per mode that has its keys and prices set. */
+const stripe: Partial<Record<StripeMode, StripeBilling>> = {};
+for (const mode of ["live", "test"] as const) {
+  const cfg = stripeConfigFromEnv(process.env, mode);
+  if (cfg) stripe[mode] = stripeBilling(cfg);
+}
+
 export default createApp({
   store: drizzleStore(drizzle(pool)),
   verifyGoogleToken: googleIdTokenVerifier(googleClientId),
   billing: billingFromEnv(process.env),
   webOrigins,
+  stripe,
 });

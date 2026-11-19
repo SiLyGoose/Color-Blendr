@@ -18,6 +18,7 @@ import {
 } from "./billing";
 import type { FolderRow, PaletteRow, UserRow } from "./db/schema";
 import { MAX_FOLDERS, hasStorePro, isPro, paletteLimit, proEndsAt } from "./plan";
+import { PLAN_IDS, StripeError, type StripeBilling, type StripeMode } from "./stripe";
 import type { Store } from "./store";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,22 @@ async function parseBody<S extends z.ZodType>(
   return result.data;
 }
 
+/** Like parseBody, but a missing or non-JSON body counts as {} (the Android app posts none). */
+async function parseOptionalBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.output<S>> {
+  let json: unknown = {};
+  try {
+    const text = await c.req.text();
+    if (text.trim()) json = JSON.parse(text);
+  } catch {
+    json = {};
+  }
+  const result = schema.safeParse(json);
+  if (!result.success) {
+    throw new HTTPException(400, { message: z.prettifyError(result.error) });
+  }
+  return result.data;
+}
+
 const PALETTE_NOT_FOUND = "Palette not found";
 const FOLDER_NOT_FOUND = "Folder not found";
 
@@ -159,7 +176,7 @@ function userDto(row: UserRow, now: Date) {
           expiresAt: row.storeProExpiresAt?.toISOString() ?? null,
           willRenew: row.storeWillRenew,
           billingIssue: row.storeBillingIssue,
-          /** "play_store", "rc_billing" (bought on the web), "promotional"… */
+          /** "play_store", "stripe" (bought on the web), "promotional"… */
           store: row.storeName,
           managementUrl: row.storeManagementUrl,
         }
@@ -217,6 +234,12 @@ export type AppDeps = {
    * responses. Empty: no browser access (the Android app doesn't need CORS).
    */
   webOrigins?: ReadonlySet<string>;
+  /**
+   * Selling Pro on the web through Stripe Checkout, per Stripe mode. Live is
+   * for everyone; test (Stripe test cards) only for tester accounts. Needs
+   * `billing` too, since Pro is still read from RevenueCat.
+   */
+  stripe?: Partial<Record<StripeMode, StripeBilling>>;
   /** Injectable for tests. */
   now?: () => Date;
 };
@@ -228,6 +251,7 @@ export function createApp({
   verifyGoogleToken,
   billing,
   webOrigins = new Set(),
+  stripe = {},
   now = () => new Date(),
 }: AppDeps) {
   const app = new Hono<Env>();
@@ -235,6 +259,10 @@ export function createApp({
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
       return c.json({ error: err.message }, err.status);
+    }
+    if (err instanceof StripeError) {
+      console.error(err.message);
+      return c.json({ error: "Payments aren’t responding right now. Please try again." }, 502);
     }
     console.error("Unhandled error", err);
     return c.json({ error: "Internal server error" }, 500);
@@ -338,16 +366,108 @@ export function createApp({
     return store.setStoreEntitlement(userId, entitlement, checkedAt);
   }
 
-  // Called by the app right after a purchase, so Pro
-  // shows up without waiting for the webhook. The request carries nothing but
-  // the session: the answer comes from RevenueCat, never from the app.
+  const isTester = (user: UserRow) => billing?.testerEmails?.has(user.email.toLowerCase()) ?? false;
+
+  /** Live or test Stripe for this request. Test mode is for tester accounts only. */
+  function stripeFor(user: UserRow, test: boolean): StripeBilling {
+    if (!billing) throw new HTTPException(503, { message: BILLING_OFF.error });
+    if (test && !isTester(user)) {
+      throw new HTTPException(403, { message: "Test purchases are only for test accounts" });
+    }
+    const s = stripe[test ? "test" : "live"];
+    if (!s) throw new HTTPException(503, { message: BILLING_OFF.error });
+    return s;
+  }
+
+  /** The web app's base URL for Stripe to send the buyer back to; only known web origins. */
+  function webAppUrl(c: Context): string {
+    const origin = c.req.header("origin")?.replace(/\/+$/, "");
+    if (!origin || !webOrigins.has(origin)) {
+      throw new HTTPException(400, { message: "Buying on the web needs the Color Blendr web app" });
+    }
+    return `${origin}/app`;
+  }
+
+  const checkoutSessionId = z
+    .string()
+    .max(255)
+    .regex(/^cs_(live|test)_[A-Za-z0-9]+$/, "must be a Stripe Checkout Session id");
+
+  const syncInput = z.object({ checkoutSessionId: checkoutSessionId.optional() });
+
+  /**
+   * Back from Stripe Checkout: if the session is this account's and paid, tell
+   * RevenueCat about the subscription now (it would otherwise learn from
+   * Stripe's notification a little later). Grants nothing by itself.
+   */
+  async function confirmCheckout(user: UserRow, sessionId: string) {
+    const s = stripeFor(user, sessionId.startsWith("cs_test_"));
+    const session = await s.getCheckout(sessionId);
+    if (session.userId !== user.id) throw new HTTPException(404, { message: "Checkout not found" });
+    if (session.status !== "complete" || !session.subscriptionId) return;
+    try {
+      await s.reportToRevenueCat(user.id, session.subscriptionId);
+    } catch (err) {
+      console.error("Reporting the Stripe purchase to RevenueCat failed", err);
+    }
+  }
+
+  // Called by the apps right after a purchase, so Pro shows up without
+  // waiting for the webhook. The answer comes from RevenueCat, never from the
+  // app. The web app may pass the Stripe Checkout Session it came back from.
   app.post("/v1/billing/sync", requireUser, async (c) => {
     if (!billing) return c.json(BILLING_OFF, 503);
     const user = c.get("user");
+    const input = await parseOptionalBody(c, syncInput);
     const last = user.storeSyncedAt?.getTime() ?? 0;
     if (now().getTime() - last < SYNC_COOLDOWN_MS) return c.json(userDto(user, now()));
+    if (input.checkoutSessionId) await confirmCheckout(user, input.checkoutSessionId);
     const updated = (await syncFromRevenueCat(billing, user.id)) ?? user;
     return c.json(userDto(updated, now()));
+  });
+
+  // --- Pro on the web: Stripe's own Checkout page ---------------------------
+
+  // The plans and prices on sale. Empty when web sales aren't set up, and the
+  // web app then points to Google Play. ?test=1: Stripe test mode (testers).
+  app.get("/v1/billing/plans", requireUser, async (c) => {
+    const test = c.req.query("test") === "1";
+    if (!billing || !stripe[test ? "test" : "live"]) return c.json({ plans: [], test });
+    return c.json({ plans: await stripeFor(c.get("user"), test).plans(), test });
+  });
+
+  const checkoutInput = z.object({ plan: z.enum(PLAN_IDS), test: z.boolean().optional() });
+
+  // Starts a Stripe Checkout for the signed-in account and returns its URL.
+  app.post("/v1/billing/checkout", requireUser, async (c) => {
+    const { plan, test = false } = await parseBody(c, checkoutInput);
+    const user = c.get("user");
+    const s = stripeFor(user, test);
+    if (hasStorePro(user, now())) {
+      return c.json({ error: "This account already has Pro.", code: "already_pro" }, 409);
+    }
+    const base = webAppUrl(c);
+    const url = await s.createCheckout({
+      plan,
+      userId: user.id,
+      email: user.email,
+      // Stripe fills in {CHECKOUT_SESSION_ID}.
+      successUrl: `${base}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${base}/?checkout=cancelled`,
+    });
+    return c.json({ url });
+  });
+
+  const portalInput = z.object({ test: z.boolean().optional() });
+
+  // A Stripe customer-portal link (cancel, change card, receipts) for the
+  // account's web subscription. 404 if it has none.
+  app.post("/v1/billing/portal", requireUser, async (c) => {
+    const { test = false } = await parseOptionalBody(c, portalInput);
+    const user = c.get("user");
+    const url = await stripeFor(user, test).portalUrl(user.id, `${webAppUrl(c)}/account`);
+    if (!url) return c.json({ error: "No web subscription found for this account" }, 404);
+    return c.json({ url });
   });
 
   // RevenueCat webhook. The payload is only a hint about whom to re-read;
